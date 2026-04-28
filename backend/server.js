@@ -497,6 +497,7 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
                     plastic_bag_weight = ?,
                     fine_amount = ?,
                     fine_based_charge = ?,
+                    status = 'completed',
                     delivered_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE job_number = ?`,
@@ -514,10 +515,10 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
                             c.name as customer_name,
                             c.phone as customer_phone,
                             c.address as customer_address,
-                            o.name as ornament_type_name
+                            ot.name as ornament_type_name
                         FROM jobs j
                         JOIN customers c ON j.customer_id = c.customer_id
-                        JOIN ornament_types o ON j.ornament_type_id = o.id
+                        JOIN ornament_types ot ON j.ornament_type_id = ot.id
                         WHERE j.job_number = ?`,
                         [jobNumber],
                         (err, updatedJob) => {
