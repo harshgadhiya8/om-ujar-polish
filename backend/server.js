@@ -420,13 +420,146 @@ app.get('/api/jobs', (req, res) => {
     });
 });
 
+// Complete a job (Phase 2/3: Final weights, fine calculation, delivery)
+app.put('/api/jobs/:jobNumber/complete', (req, res) => {
+    const { jobNumber } = req.params;
+    const { final_weight, plastic_bag_weight } = req.body;
+
+    console.log(`📋 Completing job: ${jobNumber}`);
+    console.log(`Final weight: ${final_weight}kg, Bag weight: ${plastic_bag_weight}kg`);
+
+    // Validation
+    if (!final_weight || plastic_bag_weight === undefined) {
+        return res.status(400).json({
+            error: 'Both final_weight and plastic_bag_weight are required'
+        });
+    }
+
+    const finalWeightNum = parseFloat(final_weight);
+    const bagWeightNum = parseFloat(plastic_bag_weight);
+
+    if (isNaN(finalWeightNum) || finalWeightNum <= 0) {
+        return res.status(400).json({ error: 'Invalid final weight' });
+    }
+
+    if (isNaN(bagWeightNum) || bagWeightNum < 0) {
+        return res.status(400).json({ error: 'Invalid plastic bag weight' });
+    }
+
+    if (finalWeightNum <= bagWeightNum) {
+        return res.status(400).json({
+            error: 'Final weight must be greater than plastic bag weight'
+        });
+    }
+
+    // Get job to check if it exists and get initial data
+    db.get(
+        `SELECT * FROM jobs WHERE job_number = ?`,
+        [jobNumber],
+        (err, job) => {
+            if (err) {
+                console.error('❌ Database error:', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+
+            if (!job) {
+                return res.status(404).json({ error: `Job ${jobNumber} not found` });
+            }
+
+            if (job.delivered_at) {
+                return res.status(400).json({
+                    error: `Job ${jobNumber} was already completed on ${job.delivered_at}`
+                });
+            }
+
+            // Calculate fine and charges
+            const actualOrnamentWeight = finalWeightNum - bagWeightNum;
+            const fineAmount = actualOrnamentWeight - parseFloat(job.initial_weight);
+            const fineBasedCharge = fineAmount * parseFloat(job.service_rate_per_kg);
+
+            console.log(`📊 Calculations:`);
+            console.log(`  Actual ornament weight: ${actualOrnamentWeight.toFixed(3)}kg`);
+            console.log(`  Fine (added silver): ${fineAmount.toFixed(3)}kg`);
+            console.log(`  Fine based charge: ₹${fineBasedCharge.toFixed(2)}`);
+
+            const warning = fineAmount < 0
+                ? `Warning: Silver lost during polishing: ${Math.abs(fineAmount * 1000).toFixed(0)}g`
+                : null;
+
+            if (warning) {
+                console.log(`⚠️  ${warning}`);
+            }
+
+            // Update job with completion data
+            db.run(
+                `UPDATE jobs SET
+                    final_weight = ?,
+                    plastic_bag_weight = ?,
+                    fine_amount = ?,
+                    fine_based_charge = ?,
+                    delivered_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE job_number = ?`,
+                [finalWeightNum, bagWeightNum, fineAmount, fineBasedCharge, jobNumber],
+                function(err) {
+                    if (err) {
+                        console.error('❌ Error updating job:', err);
+                        return res.status(500).json({ error: 'Failed to complete job' });
+                    }
+
+                    // Fetch updated job with all data
+                    db.get(
+                        `SELECT
+                            j.*,
+                            c.name as customer_name,
+                            c.phone as customer_phone,
+                            c.address as customer_address,
+                            o.name as ornament_type_name
+                        FROM jobs j
+                        JOIN customers c ON j.customer_id = c.customer_id
+                        JOIN ornament_types o ON j.ornament_type_id = o.id
+                        WHERE j.job_number = ?`,
+                        [jobNumber],
+                        (err, updatedJob) => {
+                            if (err) {
+                                console.error('❌ Error fetching updated job:', err);
+                                return res.status(500).json({ error: 'Job completed but fetch failed' });
+                            }
+
+                            console.log(`✅ Job ${jobNumber} completed successfully`);
+
+                            const response = {
+                                success: true,
+                                message: `Job ${jobNumber} completed successfully`,
+                                job: updatedJob,
+                                calculations: {
+                                    actual_ornament_weight: actualOrnamentWeight,
+                                    fine_amount: fineAmount,
+                                    fine_based_charge: fineBasedCharge,
+                                    service_charge: parseFloat(job.service_charge)
+                                }
+                            };
+
+                            if (warning) {
+                                response.warning = warning;
+                            }
+
+                            res.json(response);
+                        }
+                    );
+                }
+            );
+        }
+    );
+});
+
 // Mock weight endpoint (replace with real scale integration later)
 app.get('/api/weight', (req, res) => {
     // Simulate random weight for testing
     const mockWeight = (Math.random() * 0.5 + 0.1).toFixed(3);
     console.log(`⚖️  Mock weight reading: ${mockWeight}kg`);
-    
-    res.json({ 
+
+    res.json({
         weight: parseFloat(mockWeight),
         status: 'ready',
         timestamp: getCurrentTimestamp()
@@ -477,6 +610,7 @@ app.listen(port, () => {
     console.log(`   POST /api/jobs/initial           - Create initial bill`);
     console.log(`   GET  /api/jobs                   - List all jobs`);
     console.log(`   GET  /api/jobs/:jobNumber        - Get job details`);
+    console.log(`   PUT  /api/jobs/:jobNumber/complete - Complete job with final weights`);
     console.log(`   GET  /api/weight                 - Get current weight (mock)`);
     console.log('🚀 ===============================================');
     console.log('✅ Ready to serve silver polishing requests!');
