@@ -370,7 +370,7 @@ app.get('/api/jobs/:jobNumber', (req, res) => {
     
     db.get(
         `SELECT j.*, c.name as customer_name, c.phone as customer_phone,
-                ot.name as ornament_type_name
+                c.address as customer_address, ot.name as ornament_type_name
          FROM jobs j
          JOIN customers c ON j.customer_id = c.customer_id
          JOIN ornament_types ot ON j.ornament_type_id = ot.id
