@@ -4,6 +4,7 @@ const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const bwipjs = require('bwip-js');
 const path = require('path');
+const PDFDocument = require('pdfkit');
 
 // Create Express application
 const app = express();
@@ -32,12 +33,12 @@ const db = new sqlite3.Database(dbPath, (err) => {
 // DATABASE MIGRATION
 // ============================================================================
 
-// Database migration: Add fine_based_charge column if it doesn't exist
+// Database migration function
 function runMigrations() {
     console.log('🔧 Running database migrations...');
 
     db.serialize(() => {
-        // Check if fine_based_charge column exists
+        // Check current schema
         db.all("PRAGMA table_info(jobs)", (err, columns) => {
             if (err) {
                 console.error('❌ Error checking table schema:', err);
@@ -45,19 +46,141 @@ function runMigrations() {
             }
 
             const hasFineBasedCharge = columns.some(col => col.name === 'fine_based_charge');
+            const hasWeightCaptures = columns.some(col => col.name === 'weight_captures');
+            const hasJavakCaptures = columns.some(col => col.name === 'javak_vajan_captures');
 
+            // Migration 1: Add fine_based_charge column
             if (!hasFineBasedCharge) {
-                console.log('➕ Adding fine_based_charge column to jobs table...');
+                console.log('➕ Migration 1: Adding fine_based_charge column...');
                 db.run(`ALTER TABLE jobs ADD COLUMN fine_based_charge REAL`, (err) => {
                     if (err) {
-                        console.error('❌ Migration failed:', err);
+                        console.error('❌ Migration 1 failed:', err);
                     } else {
-                        console.log('✅ Migration complete: fine_based_charge column added');
+                        console.log('✅ Migration 1 complete');
                     }
                 });
-            } else {
+            }
+
+            // Migration 2: Schema update for grams, IST, nullable fields, weight captures
+            if (!hasWeightCaptures) {
+                console.log('➕ Migration 2: Updating schema for grams, IST, and weight captures...');
+                migrateToGramsAndIST();
+            }
+
+            // Migration 3: Add completion workflow fields
+            if (!hasJavakCaptures && hasWeightCaptures) {
+                console.log('➕ Migration 3: Adding completion workflow fields...');
+                db.run(`ALTER TABLE jobs ADD COLUMN javak_vajan_captures TEXT`, (err) => {
+                    if (err) {
+                        console.error('❌ Failed to add javak_vajan_captures:', err);
+                    } else {
+                        console.log('✅ Added javak_vajan_captures column');
+                    }
+                });
+                db.run(`ALTER TABLE jobs ADD COLUMN customer_bag_weight REAL DEFAULT 0`, (err) => {
+                    if (err) {
+                        console.error('❌ Failed to add customer_bag_weight:', err);
+                    } else {
+                        console.log('✅ Added customer_bag_weight column');
+                    }
+                });
+                db.run(`ALTER TABLE jobs ADD COLUMN ghat REAL DEFAULT 0`, (err) => {
+                    if (err) {
+                        console.error('❌ Failed to add ghat:', err);
+                    } else {
+                        console.log('✅ Added ghat column');
+                        console.log('✅ Migration 3 complete');
+                    }
+                });
+            }
+
+            if (hasWeightCaptures && hasJavakCaptures) {
                 console.log('✅ Database schema up to date');
             }
+        });
+    });
+}
+
+// Migration 2: Update jobs table to use grams, IST timezone, and add weight_captures
+function migrateToGramsAndIST() {
+    db.serialize(() => {
+        // Step 1: Create new table with updated schema
+        db.run(`
+            CREATE TABLE jobs_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_number TEXT UNIQUE NOT NULL,
+                customer_id TEXT NOT NULL,
+                ornament_type_id INTEGER,
+                initial_weight REAL NOT NULL,
+                weight_captures TEXT,
+                ghughri_option INTEGER DEFAULT 0,
+                service_rate_per_kg REAL,
+                service_charge REAL,
+                status TEXT DEFAULT 'received',
+                barcode TEXT UNIQUE NOT NULL,
+                created_at TEXT DEFAULT (datetime('now', '+5:30')),
+                updated_at TEXT DEFAULT (datetime('now', '+5:30')),
+
+                -- Phase 2 & 3 fields
+                final_weight REAL,
+                plastic_bag_weight REAL DEFAULT 0,
+                fine_amount REAL DEFAULT 0,
+                fine_based_charge REAL,
+                total_amount REAL,
+                delivered_at TEXT
+            )
+        `, (err) => {
+            if (err) {
+                console.error('❌ Failed to create jobs_new table:', err);
+                return;
+            }
+
+            // Step 2: Copy data from old table, converting kg to grams
+            db.run(`
+                INSERT INTO jobs_new (
+                    id, job_number, customer_id, ornament_type_id,
+                    initial_weight, weight_captures, ghughri_option,
+                    service_rate_per_kg, service_charge, status, barcode,
+                    created_at, updated_at,
+                    final_weight, plastic_bag_weight, fine_amount,
+                    fine_based_charge, total_amount, delivered_at
+                )
+                SELECT
+                    id, job_number, customer_id, ornament_type_id,
+                    initial_weight * 1000,
+                    '[]',
+                    ghughri_option,
+                    service_rate_per_kg, service_charge, status, barcode,
+                    datetime(created_at, '+5:30'),
+                    datetime(updated_at, '+5:30'),
+                    CASE WHEN final_weight IS NOT NULL THEN final_weight * 1000 ELSE NULL END,
+                    CASE WHEN plastic_bag_weight IS NOT NULL THEN plastic_bag_weight * 1000 ELSE NULL END,
+                    fine_amount,
+                    fine_based_charge, total_amount, delivered_at
+                FROM jobs
+            `, (err) => {
+                if (err) {
+                    console.error('❌ Failed to migrate data:', err);
+                    return;
+                }
+
+                // Step 3: Drop old table
+                db.run(`DROP TABLE jobs`, (err) => {
+                    if (err) {
+                        console.error('❌ Failed to drop old table:', err);
+                        return;
+                    }
+
+                    // Step 4: Rename new table
+                    db.run(`ALTER TABLE jobs_new RENAME TO jobs`, (err) => {
+                        if (err) {
+                            console.error('❌ Failed to rename table:', err);
+                        } else {
+                            console.log('✅ Migration 2 complete: Schema updated to grams and IST');
+                        }
+                    });
+                });
+            });
         });
     });
 }
@@ -148,6 +271,228 @@ async function generateBarcode(text) {
 // Get current timestamp for database
 function getCurrentTimestamp() {
     return new Date().toISOString().replace('T', ' ').split('.')[0];
+}
+
+// Generate PDF receipt for a job (thermal printer format: 8cm x 6cm)
+async function generateReceipt(jobData) {
+    return new Promise((resolve, reject) => {
+        try {
+            // 5.8cm x 7.5cm = 165 x 213 points (at 72 DPI) - thermal receipt format
+            const doc = new PDFDocument({
+                size: [165, 213],
+                margin: 5
+            });
+            const chunks = [];
+
+            doc.on('data', chunk => chunks.push(chunk));
+            doc.on('end', () => resolve(Buffer.concat(chunks)));
+            doc.on('error', reject);
+
+            // Get current date/time in IST
+            // Add 5 hours 30 minutes to UTC to get IST
+            const now = new Date();
+            const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+            const istDate = new Date(now.getTime() + istOffset);
+
+            const dateStr = istDate.toLocaleDateString('en-IN', {
+                timeZone: 'UTC',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+            const timeStr = istDate.toLocaleTimeString('en-IN', {
+                timeZone: 'UTC',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            });
+
+            // Header row: "Aum Polish" (left) and Date/Time (right)
+            doc.fontSize(10).font('Helvetica-Bold');
+            doc.text('Aum Polish', 10, 10, { width: 100, align: 'left' });
+            doc.fontSize(7).font('Helvetica');
+            doc.text(dateStr, 120, 10, { width: 97, align: 'right' });
+            doc.text(timeStr, 120, 18, { width: 97, align: 'right' });
+
+            // Horizontal line under header
+            doc.moveTo(10, 28).lineTo(217, 28).stroke();
+
+            // Customer Name (label left, value right with customer ID)
+            doc.moveDown(1.2);
+            const customerY = doc.y;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Customer Name:', 10, customerY);
+            doc.font('Helvetica');
+            doc.text(`${jobData.customer_name} (${jobData.customer_id})`, 10, customerY, { width: 207, align: 'right' });
+
+            // Horizontal line
+            doc.moveTo(10, customerY + 12).lineTo(217, customerY + 12).stroke();
+
+            // Aavak Vajan (label left, value right)
+            const weightY = customerY + 18;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Aavak Vajan:', 10, weightY);
+            doc.font('Helvetica');
+            doc.text(`${Math.floor(jobData.initial_weight)} g`, 10, weightY, { width: 207, align: 'right' });
+
+            // Horizontal line
+            doc.moveTo(10, weightY + 12).lineTo(217, weightY + 12).stroke();
+
+            // Job Number (label left, value right)
+            const jobNumY = weightY + 18;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Job Number:', 10, jobNumY);
+            doc.font('Helvetica');
+            doc.text(jobData.job_number, 10, jobNumY, { width: 207, align: 'right' });
+
+            // Horizontal line
+            doc.moveTo(10, jobNumY + 12).lineTo(217, jobNumY + 12).stroke();
+
+            // Barcode section at bottom (shifted left)
+            const bottomY = 110;
+
+            if (jobData.barcode) {
+                try {
+                    const barcodeBuffer = Buffer.from(jobData.barcode, 'base64');
+                    // Position barcode towards left
+                    const barcodeWidth = 150;
+                    const barcodeX = 20; // Shifted left from center
+                    doc.image(barcodeBuffer, barcodeX, bottomY, {
+                        fit: [barcodeWidth, 40]
+                    });
+                } catch (err) {
+                    console.error('Error adding barcode to PDF:', err);
+                }
+            }
+
+            doc.end();
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+// Generate completion PDF receipt for a job (thermal printer format: 8cm x 10cm)
+async function generateCompletionReceipt(jobData) {
+    return new Promise((resolve, reject) => {
+        try {
+            // 8cm x 10cm = 227 x 283 points (at 72 DPI) - increased height for completion fields
+            const doc = new PDFDocument({
+                size: [227, 283],
+                margin: 10
+            });
+            const chunks = [];
+
+            doc.on('data', chunk => chunks.push(chunk));
+            doc.on('end', () => resolve(Buffer.concat(chunks)));
+            doc.on('error', reject);
+
+            // Get current date/time in IST
+            const now = new Date();
+            const istOffset = 5.5 * 60 * 60 * 1000;
+            const istDate = new Date(now.getTime() + istOffset);
+
+            const dateStr = istDate.toLocaleDateString('en-IN', {
+                timeZone: 'UTC',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+            const timeStr = istDate.toLocaleTimeString('en-IN', {
+                timeZone: 'UTC',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            });
+
+            // Header row: "Aum Polish" (left) and Date/Time (right)
+            doc.fontSize(10).font('Helvetica-Bold');
+            doc.text('Aum Polish', 10, 10, { width: 100, align: 'left' });
+            doc.fontSize(7).font('Helvetica');
+            doc.text(dateStr, 120, 10, { width: 97, align: 'right' });
+            doc.text(timeStr, 120, 18, { width: 97, align: 'right' });
+
+            // Horizontal line under header
+            doc.moveTo(10, 28).lineTo(217, 28).stroke();
+
+            // Customer Name
+            doc.moveDown(1.2);
+            let currentY = doc.y;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Customer Name:', 10, currentY);
+            doc.font('Helvetica');
+            doc.text(`${jobData.customer_name} (${jobData.customer_id})`, 10, currentY, { width: 207, align: 'right' });
+            doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
+
+            // Javak Vajan
+            currentY += 18;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Javak Vajan:', 10, currentY);
+            doc.font('Helvetica');
+            doc.text(`${Math.floor(jobData.final_weight)} g`, 10, currentY, { width: 207, align: 'right' });
+            doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
+
+            // Aavak Vajan
+            currentY += 18;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Aavak Vajan:', 10, currentY);
+            doc.font('Helvetica');
+            doc.text(`${Math.floor(jobData.initial_weight)} g`, 10, currentY, { width: 207, align: 'right' });
+            doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
+
+            // Bag Vajan
+            currentY += 18;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Bag Vajan:', 10, currentY);
+            doc.font('Helvetica');
+            doc.text(`${Math.floor(jobData.plastic_bag_weight)} g`, 10, currentY, { width: 207, align: 'right' });
+            doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
+
+            // Customer Bag Weight
+            currentY += 18;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Customer Bag Weight:', 10, currentY);
+            doc.font('Helvetica');
+            doc.text(`${Math.floor(jobData.customer_bag_weight)} g`, 10, currentY, { width: 207, align: 'right' });
+            doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
+
+            // Ghat
+            currentY += 18;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Ghat:', 10, currentY);
+            doc.font('Helvetica');
+            doc.text(`${Math.floor(jobData.ghat)} g`, 10, currentY, { width: 207, align: 'right' });
+            doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
+
+            // Fine
+            currentY += 18;
+            doc.fontSize(8).font('Helvetica-Bold');
+            doc.text('Fine:', 10, currentY);
+            doc.font('Helvetica');
+            doc.text(`${Math.floor(jobData.fine_amount)} g`, 10, currentY, { width: 207, align: 'right' });
+            doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
+
+            // Barcode section at bottom (shifted left)
+            const bottomY = currentY + 20;
+
+            if (jobData.barcode) {
+                try {
+                    const barcodeBuffer = Buffer.from(jobData.barcode, 'base64');
+                    const barcodeWidth = 150;
+                    const barcodeX = 20;
+                    doc.image(barcodeBuffer, barcodeX, bottomY, {
+                        fit: [barcodeWidth, 40]
+                    });
+                } catch (err) {
+                    console.error('Error adding barcode to PDF:', err);
+                }
+            }
+
+            doc.end();
+        } catch (err) {
+            reject(err);
+        }
+    });
 }
 
 // ============================================================================
@@ -283,61 +628,55 @@ app.get('/api/ornament-types', (req, res) => {
 // Create initial job/bill
 app.post('/api/jobs/initial', async (req, res) => {
     try {
-        const { 
-            customer_id, 
-            ornament_type_id, 
-            initial_weight, 
-            ghughri_option, 
-            service_rate_per_kg 
+        const {
+            customer_id,
+            weight_captures
         } = req.body;
 
         console.log(`📝 Creating initial bill for customer: ${customer_id}`);
-        console.log(`   Weight: ${initial_weight}kg, Rate: ₹${service_rate_per_kg}/kg`);
+        console.log(`   Weight captures:`, weight_captures);
 
         // Validation
-        if (!customer_id || !ornament_type_id || !initial_weight || ghughri_option === undefined || !service_rate_per_kg) {
-            return res.status(400).json({ error: 'All fields are required' });
+        if (!customer_id) {
+            return res.status(400).json({ error: 'Customer ID is required' });
         }
 
-        if (![0, 1].includes(parseInt(ghughri_option))) {
-            return res.status(400).json({ error: 'Ghughri option must be 0 (without) or 1 (with)' });
+        if (!weight_captures || !Array.isArray(weight_captures) || weight_captures.length === 0) {
+            return res.status(400).json({ error: 'At least one weight capture is required' });
         }
+
+        // Calculate total weight in grams (ignore decimal parts when summing)
+        const totalWeight = weight_captures.reduce((sum, weight) => {
+            return sum + Math.floor(parseFloat(weight));
+        }, 0);
+
+        console.log(`   Total weight (floored): ${totalWeight}g`);
 
         // Generate job number
         const jobNumber = await generateJobNumber(customer_id);
-        
-        // Calculate service charge
-        const serviceCharge = parseFloat(initial_weight) * parseFloat(service_rate_per_kg);
-        
+
         // Generate barcode
         const barcodeBase64 = await generateBarcode(jobNumber);
-        
-        const timestamp = getCurrentTimestamp();
 
-        // Insert job into database
+        // Insert job into database (let DB handle timestamps with IST)
         db.run(
-            `INSERT INTO jobs 
-            (job_number, customer_id, ornament_type_id, initial_weight, ghughri_option, 
-             service_rate_per_kg, service_charge, barcode, created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [jobNumber, customer_id, parseInt(ornament_type_id), parseFloat(initial_weight), 
-             parseInt(ghughri_option), parseFloat(service_rate_per_kg), serviceCharge, 
-             barcodeBase64, timestamp, timestamp],
+            `INSERT INTO jobs
+            (job_number, customer_id, initial_weight, weight_captures, barcode)
+            VALUES (?, ?, ?, ?, ?)`,
+            [jobNumber, customer_id, totalWeight, JSON.stringify(weight_captures), barcodeBase64],
             function(err) {
                 if (err) {
                     console.error('❌ Error creating job:', err);
                     res.status(500).json({ error: err.message });
                 } else {
                     console.log(`✅ Job ${jobNumber} created successfully!`);
-                    console.log(`   Service Charge: ₹${serviceCharge.toFixed(2)}`);
-                    
-                    // Get complete job details with customer and ornament info
+                    console.log(`   Total Weight: ${totalWeight}g`);
+
+                    // Get complete job details with customer info
                     db.get(
-                        `SELECT j.*, c.name as customer_name, c.phone as customer_phone,
-                                ot.name as ornament_type_name
+                        `SELECT j.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address
                          FROM jobs j
                          JOIN customers c ON j.customer_id = c.customer_id
-                         JOIN ornament_types ot ON j.ornament_type_id = ot.id
                          WHERE j.id = ?`,
                         [this.lastID],
                         (err, row) => {
@@ -367,13 +706,12 @@ app.post('/api/jobs/initial', async (req, res) => {
 app.get('/api/jobs/:jobNumber', (req, res) => {
     const { jobNumber } = req.params;
     console.log(`🔍 Looking up job: ${jobNumber}`);
-    
+
     db.get(
         `SELECT j.*, c.name as customer_name, c.phone as customer_phone,
-                c.address as customer_address, ot.name as ornament_type_name
+                c.address as customer_address
          FROM jobs j
          JOIN customers c ON j.customer_id = c.customer_id
-         JOIN ornament_types ot ON j.ornament_type_id = ot.id
          WHERE j.job_number = ?`,
         [jobNumber],
         (err, row) => {
@@ -386,6 +724,89 @@ app.get('/api/jobs/:jobNumber', (req, res) => {
             } else {
                 console.log(`✅ Job ${jobNumber} found`);
                 res.json(row);
+            }
+        }
+    );
+});
+
+// Generate PDF receipt for a job
+app.get('/api/jobs/:jobNumber/receipt', async (req, res) => {
+    const { jobNumber } = req.params;
+    console.log(`🖨️  Generating PDF receipt for job: ${jobNumber}`);
+
+    db.get(
+        `SELECT j.*, c.name as customer_name, c.phone as customer_phone,
+                c.address as customer_address
+         FROM jobs j
+         JOIN customers c ON j.customer_id = c.customer_id
+         WHERE j.job_number = ?`,
+        [jobNumber],
+        async (err, row) => {
+            if (err) {
+                console.error('❌ Error fetching job:', err);
+                res.status(500).json({ error: err.message });
+            } else if (!row) {
+                console.log(`❌ Job ${jobNumber} not found`);
+                res.status(404).json({ error: 'Job not found' });
+            } else {
+                try {
+                    console.log(`✅ Generating PDF for job ${jobNumber}`);
+                    const pdfBuffer = await generateReceipt(row);
+
+                    // Set headers for PDF download
+                    res.setHeader('Content-Type', 'application/pdf');
+                    res.setHeader('Content-Disposition', `attachment; filename="receipt-${jobNumber}.pdf"`);
+                    res.setHeader('Content-Length', pdfBuffer.length);
+
+                    res.send(pdfBuffer);
+                    console.log(`✅ PDF receipt sent for job ${jobNumber}`);
+                } catch (error) {
+                    console.error('❌ Error generating PDF:', error);
+                    res.status(500).json({ error: 'Failed to generate receipt PDF' });
+                }
+            }
+        }
+    );
+});
+
+// Generate completion PDF receipt for a job
+app.get('/api/jobs/:jobNumber/completion-receipt', async (req, res) => {
+    const { jobNumber } = req.params;
+    console.log(`🖨️  Generating completion PDF receipt for job: ${jobNumber}`);
+
+    db.get(
+        `SELECT j.*, c.name as customer_name, c.phone as customer_phone,
+                c.address as customer_address
+         FROM jobs j
+         JOIN customers c ON j.customer_id = c.customer_id
+         WHERE j.job_number = ?`,
+        [jobNumber],
+        async (err, row) => {
+            if (err) {
+                console.error('❌ Error fetching job:', err);
+                res.status(500).json({ error: err.message });
+            } else if (!row) {
+                console.log(`❌ Job ${jobNumber} not found`);
+                res.status(404).json({ error: 'Job not found' });
+            } else if (!row.delivered_at) {
+                console.log(`❌ Job ${jobNumber} is not completed yet`);
+                res.status(400).json({ error: 'Job is not completed yet' });
+            } else {
+                try {
+                    console.log(`✅ Generating completion PDF for job ${jobNumber}`);
+                    const pdfBuffer = await generateCompletionReceipt(row);
+
+                    // Set headers for PDF download
+                    res.setHeader('Content-Type', 'application/pdf');
+                    res.setHeader('Content-Disposition', `attachment; filename="completion-receipt-${jobNumber}.pdf"`);
+                    res.setHeader('Content-Length', pdfBuffer.length);
+
+                    res.send(pdfBuffer);
+                    console.log(`✅ Completion PDF receipt sent for job ${jobNumber}`);
+                } catch (error) {
+                    console.error('❌ Error generating completion PDF:', error);
+                    res.status(500).json({ error: 'Failed to generate completion receipt PDF' });
+                }
             }
         }
     );
@@ -423,34 +844,44 @@ app.get('/api/jobs', (req, res) => {
 // Complete a job (Phase 2/3: Final weights, fine calculation, delivery)
 app.put('/api/jobs/:jobNumber/complete', (req, res) => {
     const { jobNumber } = req.params;
-    const { final_weight, plastic_bag_weight } = req.body;
+    let { javak_vajan_captures, bag_vajan, customer_bag_weight, ghat } = req.body;
 
     console.log(`📋 Completing job: ${jobNumber}`);
-    console.log(`Final weight: ${final_weight}kg, Bag weight: ${plastic_bag_weight}kg`);
 
     // Validation
-    if (!final_weight || plastic_bag_weight === undefined) {
+    if (!javak_vajan_captures || !Array.isArray(javak_vajan_captures) || javak_vajan_captures.length === 0) {
         return res.status(400).json({
-            error: 'Both final_weight and plastic_bag_weight are required'
+            error: 'At least one Javak Vajan capture is required'
         });
     }
 
-    const finalWeightNum = parseFloat(final_weight);
-    const bagWeightNum = parseFloat(plastic_bag_weight);
-
-    if (isNaN(finalWeightNum) || finalWeightNum <= 0) {
-        return res.status(400).json({ error: 'Invalid final weight' });
+    if (bag_vajan === undefined || bag_vajan === null) {
+        return res.status(400).json({ error: 'Bag Vajan is required' });
     }
 
-    if (isNaN(bagWeightNum) || bagWeightNum < 0) {
-        return res.status(400).json({ error: 'Invalid plastic bag weight' });
+    if (customer_bag_weight === undefined || customer_bag_weight === null) {
+        return res.status(400).json({ error: 'Customer Bag Weight is required' });
     }
 
-    if (finalWeightNum <= bagWeightNum) {
-        return res.status(400).json({
-            error: 'Final weight must be greater than plastic bag weight'
-        });
+    // Ghat is optional, default to 0 if not provided
+    if (ghat === undefined || ghat === null) {
+        ghat = 0;
     }
+
+    // Calculate total Javak Vajan (floor each weight, then sum)
+    const totalJavakVajan = javak_vajan_captures.reduce((sum, weight) => {
+        return sum + Math.floor(parseFloat(weight));
+    }, 0);
+
+    const bagVajanNum = parseFloat(bag_vajan);
+    const customerBagWeightNum = parseFloat(customer_bag_weight);
+    const ghatNum = parseFloat(ghat);
+
+    console.log(`📊 Completion Data:`);
+    console.log(`  Javak Vajan (floored total): ${totalJavakVajan}g`);
+    console.log(`  Bag Vajan: ${bagVajanNum}g`);
+    console.log(`  Customer Bag Weight: ${customerBagWeightNum}g`);
+    console.log(`  Ghat: ${ghatNum}g`);
 
     // Get job to check if it exists and get initial data
     db.get(
@@ -472,53 +903,63 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
                 });
             }
 
-            // Calculate fine and charges
-            const actualOrnamentWeight = finalWeightNum - bagWeightNum;
-            const fineAmount = actualOrnamentWeight - parseFloat(job.initial_weight);
-            const fineBasedCharge = fineAmount * parseFloat(job.service_rate_per_kg);
+            // Calculate fine: Javak - Aavak - Bag - Customer_Bag + Ghat
+            const aavakVajan = parseFloat(job.initial_weight);
+            const fineAmount = totalJavakVajan - aavakVajan - bagVajanNum - customerBagWeightNum + ghatNum;
 
-            console.log(`📊 Calculations:`);
-            console.log(`  Actual ornament weight: ${actualOrnamentWeight.toFixed(3)}kg`);
-            console.log(`  Fine (added silver): ${fineAmount.toFixed(3)}kg`);
-            console.log(`  Fine based charge: ₹${fineBasedCharge.toFixed(2)}`);
+            console.log(`📊 Fine Calculation:`);
+            console.log(`  Javak Vajan: ${totalJavakVajan}g`);
+            console.log(`  Aavak Vajan: ${aavakVajan}g`);
+            console.log(`  Bag Vajan: ${bagVajanNum}g`);
+            console.log(`  Customer Bag Weight: ${customerBagWeightNum}g`);
+            console.log(`  Ghat: ${ghatNum}g`);
+            console.log(`  Fine: ${fineAmount}g (${totalJavakVajan} - ${aavakVajan} - ${bagVajanNum} - ${customerBagWeightNum} + ${ghatNum})`);
 
-            const warning = fineAmount < 0
-                ? `Warning: Silver lost during polishing: ${Math.abs(fineAmount * 1000).toFixed(0)}g`
-                : null;
-
-            if (warning) {
-                console.log(`⚠️  ${warning}`);
-            }
+            // Calculate current IST timestamp
+            const now = new Date();
+            const istOffset = 5.5 * 60 * 60 * 1000;
+            const istDate = new Date(now.getTime() + istOffset);
+            const istTimestamp = istDate.toISOString().replace('T', ' ').split('.')[0];
 
             // Update job with completion data
             db.run(
                 `UPDATE jobs SET
+                    javak_vajan_captures = ?,
                     final_weight = ?,
                     plastic_bag_weight = ?,
+                    customer_bag_weight = ?,
+                    ghat = ?,
                     fine_amount = ?,
-                    fine_based_charge = ?,
                     status = 'completed',
-                    delivered_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
+                    delivered_at = ?,
+                    updated_at = ?
                 WHERE job_number = ?`,
-                [finalWeightNum, bagWeightNum, fineAmount, fineBasedCharge, jobNumber],
+                [
+                    JSON.stringify(javak_vajan_captures),
+                    totalJavakVajan,
+                    bagVajanNum,
+                    customerBagWeightNum,
+                    ghatNum,
+                    fineAmount,
+                    istTimestamp,
+                    istTimestamp,
+                    jobNumber
+                ],
                 function(err) {
                     if (err) {
                         console.error('❌ Error updating job:', err);
                         return res.status(500).json({ error: 'Failed to complete job' });
                     }
 
-                    // Fetch updated job with all data
+                    // Fetch updated job with all data (no JOIN with ornament_types)
                     db.get(
                         `SELECT
                             j.*,
                             c.name as customer_name,
                             c.phone as customer_phone,
-                            c.address as customer_address,
-                            ot.name as ornament_type_name
+                            c.address as customer_address
                         FROM jobs j
                         JOIN customers c ON j.customer_id = c.customer_id
-                        JOIN ornament_types ot ON j.ornament_type_id = ot.id
                         WHERE j.job_number = ?`,
                         [jobNumber],
                         (err, updatedJob) => {
@@ -528,22 +969,21 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
                             }
 
                             console.log(`✅ Job ${jobNumber} completed successfully`);
+                            console.log(`   Fine: ${fineAmount}g`);
 
                             const response = {
                                 success: true,
                                 message: `Job ${jobNumber} completed successfully`,
                                 job: updatedJob,
                                 calculations: {
-                                    actual_ornament_weight: actualOrnamentWeight,
-                                    fine_amount: fineAmount,
-                                    fine_based_charge: fineBasedCharge,
-                                    service_charge: parseFloat(job.service_charge)
+                                    javak_vajan: totalJavakVajan,
+                                    aavak_vajan: aavakVajan,
+                                    bag_vajan: bagVajanNum,
+                                    customer_bag_weight: customerBagWeightNum,
+                                    ghat: ghatNum,
+                                    fine: fineAmount
                                 }
                             };
-
-                            if (warning) {
-                                response.warning = warning;
-                            }
 
                             res.json(response);
                         }
@@ -556,9 +996,9 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
 
 // Mock weight endpoint (replace with real scale integration later)
 app.get('/api/weight', (req, res) => {
-    // Simulate random weight for testing
-    const mockWeight = (Math.random() * 0.5 + 0.1).toFixed(3);
-    console.log(`⚖️  Mock weight reading: ${mockWeight}kg`);
+    // Simulate random weight for testing (in grams, with 1 decimal place)
+    const mockWeight = (Math.random() * 4900 + 100).toFixed(1);
+    console.log(`⚖️  Mock weight reading: ${mockWeight}g`);
 
     res.json({
         weight: parseFloat(mockWeight),
