@@ -273,7 +273,7 @@ function getCurrentTimestamp() {
     return new Date().toISOString().replace('T', ' ').split('.')[0];
 }
 
-// Generate PDF receipt for a job (thermal printer format: 8cm x 6cm)
+// Generate PDF receipt for a job (thermal printer format: 5.8cm x 7.5cm)
 async function generateReceipt(jobData) {
     return new Promise((resolve, reject) => {
         try {
