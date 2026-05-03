@@ -317,36 +317,50 @@ async function generateReceipt(jobData) {
             // Horizontal line under header
             doc.moveTo(5, 23).lineTo(160, 23).stroke();
 
-            // Customer Name (label left, value right with customer ID)
-            doc.moveDown(1.2);
-            const customerY = doc.y;
-            doc.fontSize(8).font('Helvetica-Bold');
-            doc.text('Customer Name:', 10, customerY);
-            doc.font('Helvetica');
-            doc.text(`${jobData.customer_name} (${jobData.customer_id})`, 10, customerY, { width: 207, align: 'right' });
+            // Data table with bordered cells
+            const tableStartY = 28;
+            const tableX = 5;
+            const tableWidth = 155; // 165 - (2 * 5 margin)
+            const labelWidth = 62; // 40% of table width
+            const valueWidth = 93; // 60% of table width
+            const rowHeight = 15;
+            const cellPadding = 3;
 
-            // Horizontal line
-            doc.moveTo(10, customerY + 12).lineTo(217, customerY + 12).stroke();
+            const rows = [
+                { label: 'Job Number', value: jobData.job_number },
+                { label: 'Name', value: `${jobData.customer_name} (${jobData.customer_id})` },
+                { label: 'Aavak Vajan', value: `${Math.floor(jobData.initial_weight)} g` }
+            ];
 
-            // Aavak Vajan (label left, value right)
-            const weightY = customerY + 18;
-            doc.fontSize(8).font('Helvetica-Bold');
-            doc.text('Aavak Vajan:', 10, weightY);
-            doc.font('Helvetica');
-            doc.text(`${Math.floor(jobData.initial_weight)} g`, 10, weightY, { width: 207, align: 'right' });
+            let currentY = tableStartY;
 
-            // Horizontal line
-            doc.moveTo(10, weightY + 12).lineTo(217, weightY + 12).stroke();
+            rows.forEach((row) => {
+                // Draw cell borders for label cell
+                doc.rect(tableX, currentY, labelWidth, rowHeight).stroke();
 
-            // Job Number (label left, value right)
-            const jobNumY = weightY + 18;
-            doc.fontSize(8).font('Helvetica-Bold');
-            doc.text('Job Number:', 10, jobNumY);
-            doc.font('Helvetica');
-            doc.text(jobData.job_number, 10, jobNumY, { width: 207, align: 'right' });
+                // Draw cell borders for value cell
+                doc.rect(tableX + labelWidth, currentY, valueWidth, rowHeight).stroke();
 
-            // Horizontal line
-            doc.moveTo(10, jobNumY + 12).lineTo(217, jobNumY + 12).stroke();
+                // Draw label text (bold, left-aligned)
+                doc.fontSize(8).font('Helvetica-Bold');
+                doc.text(row.label, tableX + cellPadding, currentY + cellPadding, {
+                    width: labelWidth - (2 * cellPadding),
+                    height: rowHeight - (2 * cellPadding),
+                    align: 'left',
+                    lineBreak: false
+                });
+
+                // Draw value text (regular, left-aligned)
+                doc.fontSize(8).font('Helvetica');
+                doc.text(row.value, tableX + labelWidth + cellPadding, currentY + cellPadding, {
+                    width: valueWidth - (2 * cellPadding),
+                    height: rowHeight - (2 * cellPadding),
+                    align: 'left',
+                    lineBreak: false
+                });
+
+                currentY += rowHeight;
+            });
 
             // Barcode section at bottom (shifted left)
             const bottomY = 110;
