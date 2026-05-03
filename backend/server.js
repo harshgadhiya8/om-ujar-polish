@@ -362,17 +362,17 @@ async function generateReceipt(jobData) {
                 currentY += rowHeight;
             });
 
-            // Barcode section at bottom (shifted left)
-            const bottomY = 110;
+            // Barcode section - positioned left with space for handwritten remarks on right
+            const barcodeY = currentY + 8; // Small gap after table
+            const barcodeX = 10;
+            const barcodeWidth = 100; // Leave ~55pt on right for remarks
+            const barcodeHeight = 35;
 
             if (jobData.barcode) {
                 try {
                     const barcodeBuffer = Buffer.from(jobData.barcode, 'base64');
-                    // Position barcode towards left
-                    const barcodeWidth = 150;
-                    const barcodeX = 20; // Shifted left from center
-                    doc.image(barcodeBuffer, barcodeX, bottomY, {
-                        fit: [barcodeWidth, 40]
+                    doc.image(barcodeBuffer, barcodeX, barcodeY, {
+                        fit: [barcodeWidth, barcodeHeight]
                     });
                 } catch (err) {
                     console.error('Error adding barcode to PDF:', err);
