@@ -309,13 +309,13 @@ async function generateReceipt(jobData) {
 
             // Header row: "Aum Polish" (left) and Date/Time (right)
             doc.fontSize(10).font('Helvetica-Bold');
-            doc.text('Aum Polish', 10, 10, { width: 100, align: 'left' });
+            doc.text('Aum Polish', 5, 5, { width: 80, align: 'left' });
             doc.fontSize(7).font('Helvetica');
-            doc.text(dateStr, 120, 10, { width: 97, align: 'right' });
-            doc.text(timeStr, 120, 18, { width: 97, align: 'right' });
+            doc.text(dateStr, 85, 5, { width: 75, align: 'right' });
+            doc.text(timeStr, 85, 13, { width: 75, align: 'right' });
 
             // Horizontal line under header
-            doc.moveTo(10, 28).lineTo(217, 28).stroke();
+            doc.moveTo(5, 23).lineTo(160, 23).stroke();
 
             // Customer Name (label left, value right with customer ID)
             doc.moveDown(1.2);
