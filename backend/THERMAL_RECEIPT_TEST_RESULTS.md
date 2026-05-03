@@ -1,8 +1,24 @@
 # Thermal Receipt Format - End-to-End Test Results
 
-**Date:** 2026-05-03
+**Date:** 2026-05-03 (PDFs regenerated: 2026-05-03 18:49)
 **Task:** Task 5 - End-to-End Testing and Verification
 **Implementation:** Thermal receipt redesign (5.8cm x 7.5cm format)
+**Git Commit:** 11caa2c (current implementation with bordered tables)
+
+## CRITICAL UPDATE - PDF Regeneration
+
+**Issue Found:** During spec compliance review, it was discovered that the original test PDFs were generated using OLD code (before Task 3 implementation) and showed:
+- ❌ OLD dimensions: 227 x 170 points (wider, shorter)
+- ❌ OLD layout: horizontal line separators with label/value pairs
+- ❌ NO bordered table cells
+
+**Resolution:** Test PDFs have been regenerated (2026-05-03 18:49) using CURRENT code (commit 11caa2c) and now show:
+- ✅ NEW dimensions: 165 x 213 points (thermal width: 5.8cm x 7.5cm)
+- ✅ NEW layout: bordered table with 3 rows
+- ✅ All cells have visible borders on all sides
+- ✅ Barcode positioned left with space for remarks
+
+**Verification:** Both test PDFs (/tmp/test_receipt_ABC0004.pdf and /tmp/test_receipt_TST0001.pdf) have been verified to match the current implementation with correct dimensions and bordered table layout.
 
 ## Test Environment
 
