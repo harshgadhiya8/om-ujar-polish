@@ -1022,8 +1022,104 @@ app.get('/api/weight', (req, res) => {
 });
 
 // Placeholder functions for CSV and PDF generation (implemented in Tasks 2-3)
+// Generate CSV ledger export
 function generateLedgerCSV(startDate, endDate, jobs, totals, columns, res) {
-    res.status(501).json({ error: 'CSV export not yet implemented' });
+    try {
+        console.log(`📄 Generating CSV ledger for ${startDate} to ${endDate}`);
+
+        // Column definitions
+        const columnDefs = {
+            job_number: { header: 'Job Number', key: 'job_number' },
+            customer_id: { header: 'Customer ID', key: 'customer_id' },
+            customer_name: { header: 'Customer Name', key: 'customer_name' },
+            aavak_vajan: { header: 'Aavak Vajan (g)', key: 'aavak_vajan' },
+            javak_vajan: { header: 'Javak Vajan (g)', key: 'javak_vajan' },
+            bag_vajan: { header: 'Bag Vajan (g)', key: 'bag_vajan' },
+            customer_bag_weight: { header: 'Customer Bag Weight (g)', key: 'customer_bag_weight' },
+            ghat: { header: 'Ghat (g)', key: 'ghat' },
+            fine: { header: 'Fine (g)', key: 'fine' }
+        };
+
+        // Build CSV content
+        let csv = '\uFEFF'; // UTF-8 BOM for Excel compatibility
+
+        // Title and date range
+        csv += 'Daily Ledger Report\n';
+        csv += `Date Range: ${formatDateForDisplay(startDate)} to ${formatDateForDisplay(endDate)}\n`;
+        csv += '\n';
+
+        // Headers
+        const headers = columns.map(col => columnDefs[col].header);
+        csv += headers.join(',') + '\n';
+
+        // Data rows
+        jobs.forEach(job => {
+            const row = columns.map(col => {
+                const value = job[columnDefs[col].key];
+                // Handle null/undefined
+                if (value === null || value === undefined) {
+                    return '0';
+                }
+                // Escape text fields (RFC 4180 + CSV injection prevention)
+                if (typeof value === 'string') {
+                    let escapedValue = value;
+                    // Prevent CSV injection by prefixing formulas with single quote
+                    if (escapedValue.match(/^[=+\-@]/)) {
+                        escapedValue = "'" + escapedValue;
+                    }
+                    // Escape double quotes by doubling them, wrap in quotes if contains special chars
+                    if (escapedValue.includes(',') || escapedValue.includes('"') || escapedValue.includes('\n') || escapedValue.includes('\r')) {
+                        return `"${escapedValue.replace(/"/g, '""')}"`;
+                    }
+                    return escapedValue;
+                }
+                // Numbers: floor to remove decimals
+                if (typeof value === 'number') {
+                    return Math.floor(value);
+                }
+                return value;
+            });
+            csv += row.join(',') + '\n';
+        });
+
+        // Empty line before totals
+        csv += '\n';
+
+        // Totals row
+        const totalsRow = columns.map((col, index) => {
+            if (index === 0) {
+                return 'TOTAL';
+            }
+            const key = columnDefs[col].key;
+            if (totals[key] !== undefined) {
+                return Math.floor(totals[key]);
+            }
+            return '';
+        });
+        csv += totalsRow.join(',') + '\n';
+
+        // Generate filename
+        const filename = startDate === endDate
+            ? `ledger_${startDate}.csv`
+            : `ledger_${startDate}_to_${endDate}.csv`;
+
+        // Send CSV file
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Length', Buffer.byteLength(csv, 'utf8'));
+        res.send(csv);
+
+        console.log(`✅ CSV ledger sent: ${filename}`);
+    } catch (err) {
+        console.error('❌ Error generating CSV:', err);
+        res.status(500).json({ error: 'Failed to generate CSV ledger' });
+    }
+}
+
+// Helper function to format date for display
+function formatDateForDisplay(isoDate) {
+    const date = new Date(isoDate + 'T00:00:00Z'); // Parse as UTC to avoid timezone issues
+    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function generateLedgerPDF(startDate, endDate, jobs, totals, columns, res) {
