@@ -254,6 +254,12 @@ TOTAL,,,3000,3450,110,10,5,325
 - Must be one of: "json", "csv", "pdf"
 - Return 400 if invalid: `{ "error": "format must be json, csv, or pdf" }`
 
+**Columns Parameter Validation:**
+- Optional parameter (if omitted, all columns included)
+- Valid column names: job_number, customer_id, customer_name, aavak_vajan, javak_vajan, bag_vajan, customer_bag_weight, ghat, fine
+- Invalid column names are silently ignored (filter them out, include only valid ones)
+- If all specified columns are invalid: include all columns (default behavior)
+
 **No Data Handling:**
 - Return 200 with empty results (not 404)
 - Example:
