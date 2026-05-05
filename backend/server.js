@@ -1631,9 +1631,10 @@ function generateCustomerLedgerCSV(customerData, jobs, totals, view, res) {
         let csv = '\uFEFF';
 
         // Customer header section
-        csv += `Customer: ${customerData.customer_name} (${customerData.customer_id})\n`;
-        csv += `Month: ${customerData.month_display}\n`;
-        csv += '\n';
+        csv += 'Customer Monthly Ledger\r\n';
+        csv += `Customer: ${customerData.customer_name} (${customerData.customer_id})\r\n`;
+        csv += `Month: ${customerData.month_display}\r\n`;
+        csv += '\r\n';
 
         // Define columns based on view
         let columns, headers;
@@ -1655,7 +1656,7 @@ function generateCustomerLedgerCSV(customerData, jobs, totals, view, res) {
         }
 
         // Write headers
-        csv += headers.map(h => escapeCSVField(h)).join(',') + '\n';
+        csv += headers.map(h => escapeCSVField(h)).join(',') + '\r\n';
 
         // Write data rows
         jobs.forEach(job => {
@@ -1704,11 +1705,11 @@ function generateCustomerLedgerCSV(customerData, jobs, totals, view, res) {
 
                 return formatCSVValue(value, col);
             });
-            csv += row.join(',') + '\n';
+            csv += row.join(',') + '\r\n';
         });
 
         // Empty line before totals
-        csv += '\n';
+        csv += '\r\n';
 
         // Totals row
         const totalsRow = columns.map((col, index) => {
@@ -1754,7 +1755,7 @@ function generateCustomerLedgerCSV(customerData, jobs, totals, view, res) {
 
             return formatCSVValue(totalValue, col);
         });
-        csv += totalsRow.join(',') + '\n';
+        csv += totalsRow.join(',') + '\r\n';
 
         // Generate filename
         const filename = `customer_ledger_${customerData.customer_id}_${customerData.month}.csv`;
