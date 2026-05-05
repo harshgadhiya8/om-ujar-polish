@@ -1021,6 +1021,15 @@ app.get('/api/weight', (req, res) => {
     });
 });
 
+// Placeholder functions for CSV and PDF generation (implemented in Tasks 2-3)
+function generateLedgerCSV(startDate, endDate, jobs, totals, columns, res) {
+    res.status(501).json({ error: 'CSV export not yet implemented' });
+}
+
+function generateLedgerPDF(startDate, endDate, jobs, totals, columns, res) {
+    res.status(501).json({ error: 'PDF export not yet implemented' });
+}
+
 // Preview next job number for a customer
 app.get('/api/customers/:customerId/next-job-number', (req, res) => {
     const { customerId } = req.params;
@@ -1044,6 +1053,125 @@ app.get('/api/customers/:customerId/next-job-number', (req, res) => {
             }
         }
     );
+});
+
+// Get ledger data with date filtering and format support
+app.get('/api/ledger', (req, res) => {
+    const { start_date, end_date, format = 'json', columns } = req.query;
+
+    console.log(`📊 Fetching ledger: ${start_date} to ${end_date || start_date}, format: ${format}`);
+
+    // Validation: start_date required
+    if (!start_date) {
+        return res.status(400).json({ error: 'start_date is required' });
+    }
+
+    // Validation: date format (basic check for YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(start_date)) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+
+    // Default end_date to start_date if not provided
+    const endDate = end_date || start_date;
+
+    // Validation: end_date format
+    if (!dateRegex.test(endDate)) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+
+    // Validation: end_date >= start_date
+    if (new Date(endDate) < new Date(start_date)) {
+        return res.status(400).json({ error: 'end_date must be >= start_date' });
+    }
+
+    // Validation: format parameter
+    if (!['json', 'csv', 'pdf'].includes(format)) {
+        return res.status(400).json({ error: 'format must be json, csv, or pdf' });
+    }
+
+    // Parse columns parameter (comma-separated)
+    const validColumns = [
+        'job_number', 'customer_id', 'customer_name',
+        'aavak_vajan', 'javak_vajan', 'bag_vajan',
+        'customer_bag_weight', 'ghat', 'fine'
+    ];
+
+    let selectedColumns = validColumns; // Default: all columns
+    if (columns) {
+        const requestedColumns = columns.split(',').map(c => c.trim());
+        const filteredColumns = requestedColumns.filter(c => validColumns.includes(c));
+        if (filteredColumns.length > 0) {
+            selectedColumns = filteredColumns;
+        }
+    }
+
+    // Query database for completed jobs in date range
+    const query = `
+        SELECT
+            j.job_number,
+            j.customer_id,
+            c.name as customer_name,
+            j.initial_weight as aavak_vajan,
+            j.final_weight as javak_vajan,
+            j.plastic_bag_weight as bag_vajan,
+            j.customer_bag_weight,
+            j.ghat,
+            j.fine_amount as fine,
+            j.delivered_at
+        FROM jobs j
+        JOIN customers c ON j.customer_id = c.customer_id
+        WHERE j.status = 'completed'
+          AND DATE(j.delivered_at) >= DATE(?)
+          AND DATE(j.delivered_at) <= DATE(?)
+        ORDER BY j.delivered_at DESC
+    `;
+
+    db.all(query, [start_date, endDate], (err, jobs) => {
+        if (err) {
+            console.error('❌ Database error:', err);
+            return res.status(500).json({ error: 'Database error occurred' });
+        }
+
+        console.log(`✅ Found ${jobs.length} completed jobs`);
+
+        // Handle NULL fine_amount (treat as 0)
+        const processedJobs = jobs.map(job => ({
+            ...job,
+            fine: job.fine || 0
+        }));
+
+        // Calculate totals
+        const totals = processedJobs.reduce((acc, job) => ({
+            aavak_vajan: acc.aavak_vajan + (job.aavak_vajan || 0),
+            javak_vajan: acc.javak_vajan + (job.javak_vajan || 0),
+            bag_vajan: acc.bag_vajan + (job.bag_vajan || 0),
+            customer_bag_weight: acc.customer_bag_weight + (job.customer_bag_weight || 0),
+            ghat: acc.ghat + (job.ghat || 0),
+            fine: acc.fine + (job.fine || 0)
+        }), {
+            aavak_vajan: 0,
+            javak_vajan: 0,
+            bag_vajan: 0,
+            customer_bag_weight: 0,
+            ghat: 0,
+            fine: 0
+        });
+
+        // Respond based on format
+        if (format === 'json') {
+            res.json({
+                start_date: start_date,
+                end_date: endDate,
+                jobs: processedJobs,
+                totals: totals
+            });
+        } else if (format === 'csv') {
+            generateLedgerCSV(start_date, endDate, processedJobs, totals, selectedColumns, res);
+        } else if (format === 'pdf') {
+            generateLedgerPDF(start_date, endDate, processedJobs, totals, selectedColumns, res);
+        }
+    });
 });
 
 // ============================================================================
