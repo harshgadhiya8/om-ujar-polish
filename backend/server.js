@@ -1622,9 +1622,199 @@ app.get('/api/customer-ledger', (req, res) => {
     });
 });
 
-// Customer Ledger CSV Generator (stub - implemented in Task 3)
+// Customer Ledger CSV Generator
 function generateCustomerLedgerCSV(customerData, jobs, totals, view, res) {
-    res.status(501).json({ error: 'CSV export not yet implemented' });
+    try {
+        console.log(`📄 Generating CSV for ${customerData.customer_id} in ${customerData.month}, view: ${view}`);
+
+        // UTF-8 BOM for Excel compatibility
+        let csv = '\uFEFF';
+
+        // Customer header section
+        csv += `Customer: ${customerData.customer_name} (${customerData.customer_id})\n`;
+        csv += `Month: ${customerData.month_display}\n`;
+        csv += '\n';
+
+        // Define columns based on view
+        let columns, headers;
+
+        if (view === 'summary') {
+            // Summary view: 5 columns
+            columns = ['job_number', 'delivered_at', 'aavak_vajan', 'javak_vajan', 'fine'];
+            headers = ['Job Number', 'Date', 'Aavak Vajan (g)', 'Javak Vajan (g)', 'Fine (g)'];
+        } else {
+            // Detailed view: 10 columns
+            columns = [
+                'delivered_at', 'job_number', 'customer_id', 'customer_name',
+                'aavak_vajan', 'javak_vajan', 'bag_vajan', 'customer_bag_weight', 'ghat', 'fine'
+            ];
+            headers = [
+                'Date', 'Job Number', 'Customer ID', 'Customer Name',
+                'Aavak Vajan (g)', 'Javak Vajan (g)', 'Bag Vajan (g)', 'Customer Bag Weight (g)', 'Ghat (g)', 'Fine (g)'
+            ];
+        }
+
+        // Write headers
+        csv += headers.map(h => escapeCSVField(h)).join(',') + '\n';
+
+        // Write data rows
+        jobs.forEach(job => {
+            const row = columns.map(col => {
+                let value;
+
+                switch (col) {
+                    case 'delivered_at':
+                        // Format date as YYYY-MM-DD
+                        if (job.delivered_at) {
+                            value = job.delivered_at.split(' ')[0]; // Take just the date part
+                        } else {
+                            value = '';
+                        }
+                        break;
+                    case 'job_number':
+                        value = job.job_number;
+                        break;
+                    case 'customer_id':
+                        value = job.customer_id;
+                        break;
+                    case 'customer_name':
+                        value = job.customer_name;
+                        break;
+                    case 'aavak_vajan':
+                        value = job.aavak_vajan || 0;
+                        break;
+                    case 'javak_vajan':
+                        value = job.javak_vajan || 0;
+                        break;
+                    case 'bag_vajan':
+                        value = job.bag_vajan || 0;
+                        break;
+                    case 'customer_bag_weight':
+                        value = job.customer_bag_weight || 0;
+                        break;
+                    case 'ghat':
+                        value = job.ghat || 0;
+                        break;
+                    case 'fine':
+                        value = job.fine || 0;
+                        break;
+                    default:
+                        value = '';
+                }
+
+                return formatCSVValue(value, col);
+            });
+            csv += row.join(',') + '\n';
+        });
+
+        // Empty line before totals
+        csv += '\n';
+
+        // Totals row
+        const totalsRow = columns.map((col, index) => {
+            if (index === 0) {
+                return 'TOTAL';
+            }
+
+            let totalValue;
+            switch (col) {
+                case 'delivered_at':
+                    totalValue = '';
+                    break;
+                case 'job_number':
+                    totalValue = '';
+                    break;
+                case 'customer_id':
+                    totalValue = '';
+                    break;
+                case 'customer_name':
+                    totalValue = '';
+                    break;
+                case 'aavak_vajan':
+                    totalValue = totals.aavak_vajan || 0;
+                    break;
+                case 'javak_vajan':
+                    totalValue = totals.javak_vajan || 0;
+                    break;
+                case 'bag_vajan':
+                    totalValue = totals.bag_vajan || 0;
+                    break;
+                case 'customer_bag_weight':
+                    totalValue = totals.customer_bag_weight || 0;
+                    break;
+                case 'ghat':
+                    totalValue = totals.ghat || 0;
+                    break;
+                case 'fine':
+                    totalValue = totals.fine || 0;
+                    break;
+                default:
+                    totalValue = '';
+            }
+
+            return formatCSVValue(totalValue, col);
+        });
+        csv += totalsRow.join(',') + '\n';
+
+        // Generate filename
+        const filename = `customer_ledger_${customerData.customer_id}_${customerData.month}.csv`;
+
+        // Send CSV file
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Length', Buffer.byteLength(csv, 'utf8'));
+        res.send(csv);
+
+        console.log(`✅ CSV generated: ${filename} (${view} view, ${jobs.length} jobs)`);
+    } catch (err) {
+        console.error('❌ Error generating CSV:', err);
+        res.status(500).json({ error: 'Failed to generate CSV' });
+    }
+}
+
+// Helper function to format CSV values
+function formatCSVValue(value, fieldName) {
+    // Handle null/undefined
+    if (value === null || value === undefined) {
+        return '0';
+    }
+
+    // String fields: escape and prevent CSV injection
+    if (typeof value === 'string') {
+        let escapedValue = value;
+
+        // Prevent CSV injection by prefixing formulas with single quote
+        if (escapedValue.match(/^[=+\-@]/)) {
+            escapedValue = "'" + escapedValue;
+        }
+
+        // RFC 4180: Escape double quotes by doubling them, wrap in quotes if contains special chars
+        if (escapedValue.includes(',') || escapedValue.includes('"') || escapedValue.includes('\n') || escapedValue.includes('\r')) {
+            return `"${escapedValue.replace(/"/g, '""')}"`;
+        }
+        return escapedValue;
+    }
+
+    // Numeric fields: floor to remove decimals
+    if (typeof value === 'number') {
+        return Math.floor(value).toString();
+    }
+
+    return String(value);
+}
+
+// Helper function to escape CSV field
+function escapeCSVField(field) {
+    if (!field) return '';
+
+    let escaped = String(field);
+
+    // RFC 4180: Wrap in quotes if contains comma, quote, newline, or carriage return
+    if (escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') || escaped.includes('\r')) {
+        return `"${escaped.replace(/"/g, '""')}"`;
+    }
+
+    return escaped;
 }
 
 // Customer Ledger PDF Generator (stub - implemented in Task 4)
