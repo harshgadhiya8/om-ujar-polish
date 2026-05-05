@@ -1818,9 +1818,221 @@ function escapeCSVField(field) {
     return escaped;
 }
 
-// Customer Ledger PDF Generator (stub - implemented in Task 4)
-function generateCustomerLedgerPDF(customerData, jobs, totals, view, res) {
-    res.status(501).json({ error: 'PDF export not yet implemented' });
+// Customer Ledger PDF Generator
+async function generateCustomerLedgerPDF(customerData, jobs, totals, view, res) {
+    try {
+        console.log(`📄 Generating PDF ledger for ${customerData.customer_id}, ${customerData.month}, view: ${view}`);
+
+        const doc = new PDFDocument({
+            size: 'A4',
+            layout: 'landscape',
+            margin: 20
+        });
+
+        // Stream handling
+        const chunks = [];
+        doc.on('data', chunk => chunks.push(chunk));
+        doc.on('end', () => {
+            const pdfBuffer = Buffer.concat(chunks);
+            const filename = `customer_ledger_${customerData.customer_id}_${customerData.month}.pdf`;
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.setHeader('Content-Length', pdfBuffer.length);
+            res.send(pdfBuffer);
+
+            console.log(`✅ PDF ledger sent: ${filename}`);
+        });
+
+        doc.on('error', (err) => {
+            console.error('❌ PDF generation error:', err);
+            // Cannot send response here - stream already started
+        });
+
+        // Header section
+        doc.fontSize(16).font('Helvetica-Bold');
+        doc.text('Aum Polish', 0, 30, { align: 'center' });
+
+        doc.fontSize(12).font('Helvetica');
+        doc.text('Customer Monthly Ledger', 0, 50, { align: 'center' });
+
+        doc.fontSize(10);
+        doc.text(`Customer: ${customerData.customer_name} (${customerData.customer_id})`, 20, 80);
+        doc.text(`Month: ${customerData.month_display}`, 20, 95);
+
+        // Horizontal line
+        doc.moveTo(20, 110).lineTo(822, 110).stroke();
+
+        // Column definitions based on view mode
+        const columnDefs = {
+            summary: [
+                { key: 'job_number', label: 'Job Number', width: 0.25, isNumeric: false },
+                { key: 'delivered_at', label: 'Date', width: 0.15, isNumeric: false },
+                { key: 'aavak_vajan', label: 'Aavak Vajan (g)', width: 0.20, isNumeric: true },
+                { key: 'javak_vajan', label: 'Javak Vajan (g)', width: 0.20, isNumeric: true },
+                { key: 'fine', label: 'Fine (g)', width: 0.20, isNumeric: true }
+            ],
+            detailed: [
+                { key: 'delivered_at', label: 'Date', width: 0.08, isNumeric: false },
+                { key: 'job_number', label: 'Job Number', width: 0.12, isNumeric: false },
+                { key: 'customer_id', label: 'Customer ID', width: 0.08, isNumeric: false },
+                { key: 'customer_name', label: 'Customer Name', width: 0.12, isNumeric: false },
+                { key: 'aavak_vajan', label: 'Aavak Vajan (g)', width: 0.12, isNumeric: true },
+                { key: 'javak_vajan', label: 'Javak Vajan (g)', width: 0.12, isNumeric: true },
+                { key: 'bag_vajan', label: 'Bag Vajan (g)', width: 0.09, isNumeric: true },
+                { key: 'customer_bag_weight', label: 'Cust Bag (g)', width: 0.09, isNumeric: true },
+                { key: 'ghat', label: 'Ghat (g)', width: 0.09, isNumeric: true },
+                { key: 'fine', label: 'Fine (g)', width: 0.09, isNumeric: true }
+            ]
+        };
+
+        const columns = columnDefs[view];
+        const tableWidth = 802; // A4 landscape width minus margins (842 - 40)
+        const tableX = 20;
+        let tableY = 120;
+
+        // Format date for display
+        function formatDateForPDF(isoString) {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            return `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+
+        // Draw table header
+        function drawTableHeader(y) {
+            let x = tableX;
+
+            doc.font('Helvetica-Bold').fontSize(9);
+
+            columns.forEach(col => {
+                const colWidth = tableWidth * col.width;
+
+                // Draw header cell background
+                doc.rect(x, y, colWidth, 20).fillAndStroke('#007bff', '#000');
+
+                // Draw header text
+                doc.fillColor('#ffffff');
+                const textAlign = col.isNumeric ? 'right' : 'left';
+                const textX = col.isNumeric ? x + colWidth - 6 : x + 6;
+                doc.text(col.label, textX, y + 6, {
+                    width: colWidth - 12,
+                    align: textAlign
+                });
+
+                x += colWidth;
+            });
+
+            doc.fillColor('#000000');
+            return y + 20;
+        }
+
+        // Draw initial header
+        tableY = drawTableHeader(tableY);
+
+        // Draw data rows
+        doc.font('Helvetica').fontSize(8);
+
+        jobs.forEach((job, index) => {
+            // Check if we need a new page
+            if (tableY > 520) { // Leave space for footer
+                doc.addPage();
+                tableY = 30;
+                tableY = drawTableHeader(tableY);
+            }
+
+            let x = tableX;
+
+            // Alternating row background
+            const bgColor = index % 2 === 0 ? '#ffffff' : '#f9f9f9';
+            doc.rect(tableX, tableY, tableWidth, 16).fillAndStroke(bgColor, '#ddd');
+
+            doc.fillColor('#000000');
+
+            columns.forEach(col => {
+                const colWidth = tableWidth * col.width;
+                let value = job[col.key];
+
+                // Format value
+                if (col.key === 'delivered_at') {
+                    value = formatDateForPDF(value);
+                } else if (col.isNumeric && value !== null && value !== undefined) {
+                    value = Math.floor(value).toString();
+                } else if (value === null || value === undefined) {
+                    value = '';
+                } else {
+                    value = String(value);
+                }
+
+                // Draw cell text
+                const textAlign = col.isNumeric ? 'right' : 'left';
+                const textX = col.isNumeric ? x + colWidth - 6 : x + 6;
+
+                doc.text(value, textX, tableY + 4, {
+                    width: colWidth - 12,
+                    align: textAlign,
+                    ellipsis: true
+                });
+
+                x += colWidth;
+            });
+
+            tableY += 16;
+        });
+
+        // Draw totals row
+        if (tableY > 520) {
+            doc.addPage();
+            tableY = 30;
+            tableY = drawTableHeader(tableY);
+        }
+
+        let x = tableX;
+        doc.rect(tableX, tableY, tableWidth, 18).fillAndStroke('#e9ecef', '#000');
+
+        doc.font('Helvetica-Bold').fontSize(8);
+        doc.fillColor('#000000');
+
+        columns.forEach((col, index) => {
+            const colWidth = tableWidth * col.width;
+            let value = '';
+
+            if (index === 0) {
+                value = 'TOTAL';
+            } else if (col.isNumeric) {
+                const total = totals[col.key] || 0;
+                value = Math.floor(total).toString();
+            }
+
+            const textAlign = col.isNumeric ? 'right' : 'left';
+            const textX = col.isNumeric ? x + colWidth - 6 : x + 6;
+
+            doc.text(value, textX, tableY + 5, {
+                width: colWidth - 12,
+                align: textAlign
+            });
+
+            x += colWidth;
+        });
+
+        tableY += 18;
+
+        // Footer
+        doc.moveTo(20, tableY + 10).lineTo(822, tableY + 10).stroke();
+
+        doc.font('Helvetica').fontSize(8);
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+        const istDate = new Date(now.getTime() + istOffset);
+        const timestamp = istDate.toISOString().replace('T', ' ').substring(0, 19) + ' IST';
+
+        doc.text(`Generated: ${timestamp}`, 0, tableY + 15, { align: 'center' });
+        doc.text(`Total Jobs: ${totals.total_jobs}`, 0, tableY + 28, { align: 'center' });
+
+        doc.end();
+    } catch (err) {
+        console.error('❌ Error generating PDF:', err);
+        res.status(500).json({ error: 'Failed to generate PDF ledger' });
+    }
 }
 
 // ============================================================================
