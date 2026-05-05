@@ -1496,9 +1496,141 @@ app.get('/api/customer-ledger', (req, res) => {
         return;
     }
 
-    // Mode 2 will be implemented in next task
-    res.status(400).json({ error: 'Mode 2 not yet implemented' });
+    // Mode 2: Customer Monthly Detail
+    // Validation
+    if (customer_id && !month) {
+        return res.status(400).json({ error: 'Month parameter required when customer_id is provided' });
+    }
+
+    if (!customer_id && month) {
+        return res.status(400).json({ error: 'Customer ID parameter required when month is provided' });
+    }
+
+    // Validate month format (YYYY-MM)
+    const monthPattern = /^\d{4}-\d{2}$/;
+    if (!monthPattern.test(month)) {
+        return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM (e.g., 2026-05)' });
+    }
+
+    // Validate month value (01-12)
+    const monthNum = parseInt(month.split('-')[1]);
+    if (monthNum < 1 || monthNum > 12) {
+        return res.status(400).json({ error: 'Invalid month. Must be between 01 and 12' });
+    }
+
+    // Validate format
+    if (!['json', 'csv', 'pdf'].includes(format)) {
+        return res.status(400).json({ error: 'Invalid format. Use json, csv, or pdf' });
+    }
+
+    // Validate view
+    if (!['summary', 'detailed'].includes(view)) {
+        return res.status(400).json({ error: 'Invalid view. Use summary or detailed' });
+    }
+
+    console.log(`📊 Fetching customer ledger: ${customer_id} for ${month}, format: ${format}, view: ${view}`);
+
+    // Check if customer exists
+    db.get('SELECT customer_id, name FROM customers WHERE customer_id = ?', [customer_id], (err, customer) => {
+        if (err) {
+            console.error('❌ Error checking customer:', err);
+            return res.status(500).json({ error: 'Failed to fetch customer ledger' });
+        }
+
+        if (!customer) {
+            return res.status(404).json({ error: `Customer ${customer_id} not found` });
+        }
+
+        // Fetch jobs for customer in the specified month
+        const query = `
+            SELECT
+                j.job_number,
+                j.delivered_at,
+                j.customer_id,
+                c.name as customer_name,
+                j.initial_weight as aavak_vajan,
+                j.final_weight as javak_vajan,
+                j.plastic_bag_weight as bag_vajan,
+                j.customer_bag_weight,
+                j.ghat,
+                j.fine_amount as fine
+            FROM jobs j
+            JOIN customers c ON j.customer_id = c.customer_id
+            WHERE j.customer_id = ?
+              AND j.status = 'completed'
+              AND strftime('%Y-%m', j.delivered_at) = ?
+            ORDER BY j.delivered_at DESC
+        `;
+
+        db.all(query, [customer_id, month], (err, jobs) => {
+            if (err) {
+                console.error('❌ Error fetching jobs:', err);
+                return res.status(500).json({ error: 'Failed to fetch customer ledger' });
+            }
+
+            console.log(`✅ Found ${jobs.length} completed jobs for ${customer_id} in ${month}`);
+
+            // Calculate totals
+            const totals = {
+                total_jobs: jobs.length,
+                aavak_vajan: 0,
+                javak_vajan: 0,
+                bag_vajan: 0,
+                customer_bag_weight: 0,
+                ghat: 0,
+                fine: 0
+            };
+
+            jobs.forEach(job => {
+                totals.aavak_vajan += job.aavak_vajan || 0;
+                totals.javak_vajan += job.javak_vajan || 0;
+                totals.bag_vajan += job.bag_vajan || 0;
+                totals.customer_bag_weight += job.customer_bag_weight || 0;
+                totals.ghat += job.ghat || 0;
+                totals.fine += job.fine || 0;
+            });
+
+            // Format month display (e.g., "2026-05" -> "May 2026")
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                                'July', 'August', 'September', 'October', 'November', 'December'];
+            const [year, monthStr] = month.split('-');
+            const monthIndex = parseInt(monthStr) - 1;
+            const monthDisplay = `${monthNames[monthIndex]} ${year}`;
+
+            const customerData = {
+                customer_id: customer.customer_id,
+                customer_name: customer.name,
+                month: month,
+                month_display: monthDisplay,
+                view: view
+            };
+
+            // Handle different formats
+            if (format === 'csv') {
+                generateCustomerLedgerCSV(customerData, jobs, totals, view, res);
+            } else if (format === 'pdf') {
+                generateCustomerLedgerPDF(customerData, jobs, totals, view, res);
+            } else {
+                // JSON response
+                res.json({
+                    ...customerData,
+                    jobs,
+                    totals
+                });
+            }
+        });
+    });
 });
+
+// Customer Ledger CSV Generator (stub - implemented in Task 3)
+function generateCustomerLedgerCSV(customerData, jobs, totals, view, res) {
+    res.status(501).json({ error: 'CSV export not yet implemented' });
+}
+
+// Customer Ledger PDF Generator (stub - implemented in Task 4)
+function generateCustomerLedgerPDF(customerData, jobs, totals, view, res) {
+    res.status(501).json({ error: 'PDF export not yet implemented' });
+}
 
 // ============================================================================
 // SERVER STARTUP
