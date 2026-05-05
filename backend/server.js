@@ -1122,8 +1122,197 @@ function formatDateForDisplay(isoDate) {
     return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function generateLedgerPDF(startDate, endDate, jobs, totals, columns, res) {
-    res.status(501).json({ error: 'PDF export not yet implemented' });
+// Generate PDF ledger export
+async function generateLedgerPDF(startDate, endDate, jobs, totals, columns, res) {
+    try {
+        console.log(`📄 Generating PDF ledger for ${startDate} to ${endDate}`);
+
+        // A4 landscape: 842 x 595 points
+        const doc = new PDFDocument({
+            size: 'A4',
+            layout: 'landscape',
+            margin: 20
+        });
+
+        const chunks = [];
+        doc.on('data', chunk => chunks.push(chunk));
+        doc.on('end', () => {
+            const pdfBuffer = Buffer.concat(chunks);
+
+            // Generate filename
+            const filename = startDate === endDate
+                ? `ledger_${startDate}.pdf`
+                : `ledger_${startDate}_to_${endDate}.pdf`;
+
+            // Send PDF file
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.setHeader('Content-Length', pdfBuffer.length);
+            res.send(pdfBuffer);
+
+            console.log(`✅ PDF ledger sent: ${filename}`);
+        });
+        doc.on('error', (err) => {
+            console.error('❌ PDF generation error:', err);
+            // Cannot send response here - stream already started
+        });
+
+        // Header section
+        doc.fontSize(14).font('Helvetica-Bold');
+        doc.text('Aum Polish', 0, 30, { align: 'center' });
+        doc.fontSize(12).font('Helvetica');
+        doc.text('Daily Ledger Report', 0, 50, { align: 'center' });
+        doc.fontSize(10);
+        doc.text(`${formatDateForDisplay(startDate)} to ${formatDateForDisplay(endDate)}`, 0, 70, { align: 'center' });
+
+        // Horizontal line
+        doc.moveTo(20, 90).lineTo(822, 90).stroke();
+
+        // Column definitions
+        const columnDefs = {
+            job_number: { header: 'Job Number', width: 70 },
+            customer_id: { header: 'Cust ID', width: 50 },
+            customer_name: { header: 'Name', width: 90 },
+            aavak_vajan: { header: 'Aavak (g)', width: 60 },
+            javak_vajan: { header: 'Javak (g)', width: 60 },
+            bag_vajan: { header: 'Bag (g)', width: 55 },
+            customer_bag_weight: { header: 'C.Bag (g)', width: 65 },
+            ghat: { header: 'Ghat (g)', width: 55 },
+            fine: { header: 'Fine (g)', width: 55 }
+        };
+
+        // Calculate table dimensions
+        const tableX = 20;
+        let tableY = 100;
+        const rowHeight = 20;
+        const cellPadding = 3;
+
+        // Filter columns
+        const activeColumns = columns.map(col => ({
+            key: col,
+            ...columnDefs[col]
+        }));
+
+        const tableWidth = activeColumns.reduce((sum, col) => sum + col.width, 0);
+
+        // Draw header row
+        let currentX = tableX;
+        doc.fontSize(9).font('Helvetica-Bold');
+        activeColumns.forEach(col => {
+            // Draw cell border
+            doc.rect(currentX, tableY, col.width, rowHeight).stroke();
+
+            // Draw header text
+            doc.text(col.header, currentX + cellPadding, tableY + cellPadding, {
+                width: col.width - (2 * cellPadding),
+                height: rowHeight - (2 * cellPadding),
+                align: ['aavak_vajan', 'javak_vajan', 'bag_vajan', 'customer_bag_weight', 'ghat', 'fine'].includes(col.key) ? 'right' : 'left'
+            });
+
+            currentX += col.width;
+        });
+
+        tableY += rowHeight;
+
+        // Draw data rows
+        doc.font('Helvetica').fontSize(8);
+        jobs.forEach(job => {
+            currentX = tableX;
+
+            activeColumns.forEach(col => {
+                // Draw cell border
+                doc.rect(currentX, tableY, col.width, rowHeight).stroke();
+
+                // Get value
+                let value = job[col.key];
+                if (value === null || value === undefined) {
+                    value = '0';
+                } else if (typeof value === 'number') {
+                    value = Math.floor(value).toString();
+                } else if (typeof value === 'string' && value.length > 15) {
+                    // Truncate long names
+                    value = value.substring(0, 12) + '...';
+                }
+
+                // Draw value text
+                doc.text(value, currentX + cellPadding, tableY + cellPadding, {
+                    width: col.width - (2 * cellPadding),
+                    height: rowHeight - (2 * cellPadding),
+                    align: ['aavak_vajan', 'javak_vajan', 'bag_vajan', 'customer_bag_weight', 'ghat', 'fine'].includes(col.key) ? 'right' : 'left'
+                });
+
+                currentX += col.width;
+            });
+
+            tableY += rowHeight;
+
+            // Check if we need a new page
+            if (tableY > 520) { // Leave space for footer
+                doc.addPage();
+                tableY = 40;
+
+                // Redraw table headers on new page
+                let currentX = tableX;
+                doc.fontSize(9).font('Helvetica-Bold');
+                activeColumns.forEach(col => {
+                    // Draw cell border
+                    doc.rect(currentX, tableY, col.width, rowHeight).stroke();
+
+                    // Draw header text
+                    doc.text(col.header, currentX + cellPadding, tableY + cellPadding, {
+                        width: col.width - (2 * cellPadding),
+                        height: rowHeight - (2 * cellPadding),
+                        align: ['aavak_vajan', 'javak_vajan', 'bag_vajan', 'customer_bag_weight', 'ghat', 'fine'].includes(col.key) ? 'right' : 'left'
+                    });
+
+                    currentX += col.width;
+                });
+
+                tableY += rowHeight;
+                doc.font('Helvetica').fontSize(8); // Reset to data row font
+            }
+        });
+
+        // Draw totals row
+        currentX = tableX;
+        doc.font('Helvetica-Bold').fontSize(8);
+
+        activeColumns.forEach((col, index) => {
+            // Draw cell border
+            doc.rect(currentX, tableY, col.width, rowHeight).stroke();
+
+            // Get total value
+            let value = '';
+            if (index === 0) {
+                value = 'TOTAL';
+            } else if (totals[col.key] !== undefined) {
+                value = Math.floor(totals[col.key]).toString();
+            }
+
+            // Draw total text
+            doc.text(value, currentX + cellPadding, tableY + cellPadding, {
+                width: col.width - (2 * cellPadding),
+                height: rowHeight - (2 * cellPadding),
+                align: index === 0 ? 'left' : 'right'
+            });
+
+            currentX += col.width;
+        });
+
+        // Footer
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const istDate = new Date(now.getTime() + istOffset);
+        const timestamp = istDate.toLocaleString('en-IN', { timeZone: 'UTC' });
+
+        doc.fontSize(7).font('Helvetica');
+        doc.text(`Generated on ${timestamp}`, 20, 570, { align: 'left' });
+
+        doc.end();
+    } catch (err) {
+        console.error('❌ Error generating PDF:', err);
+        res.status(500).json({ error: 'Failed to generate PDF ledger' });
+    }
 }
 
 // Preview next job number for a customer
