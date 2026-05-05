@@ -1460,6 +1460,47 @@ app.get('/api/ledger', (req, res) => {
 });
 
 // ============================================================================
+// CUSTOMER LEDGER API
+// ============================================================================
+
+app.get('/api/customer-ledger', (req, res) => {
+    const { customer_id, month, format = 'json', view = 'detailed' } = req.query;
+
+    // Mode 1: Customer List (no parameters)
+    if (!customer_id && !month) {
+        console.log('📊 Fetching customer list with job counts');
+
+        const query = `
+            SELECT
+                c.customer_id,
+                c.name,
+                c.phone,
+                COUNT(j.id) as total_jobs,
+                SUM(CASE WHEN j.status = 'completed' THEN 1 ELSE 0 END) as completed_jobs
+            FROM customers c
+            LEFT JOIN jobs j ON c.customer_id = j.customer_id
+            GROUP BY c.customer_id, c.name, c.phone
+            ORDER BY c.name ASC
+        `;
+
+        db.all(query, [], (err, customers) => {
+            if (err) {
+                console.error('❌ Error fetching customers:', err);
+                return res.status(500).json({ error: 'Failed to fetch customers' });
+            }
+
+            console.log(`✅ Found ${customers.length} customers`);
+            res.json({ customers });
+        });
+
+        return;
+    }
+
+    // Mode 2 will be implemented in next task
+    res.status(400).json({ error: 'Mode 2 not yet implemented' });
+});
+
+// ============================================================================
 // SERVER STARTUP
 // ============================================================================
 
