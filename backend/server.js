@@ -1090,15 +1090,11 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
     );
 });
 
-// Mock weight endpoint (replace with real scale integration later)
+// Weight endpoint - reads from live serial port connection
 app.get('/api/weight', (req, res) => {
-    // Simulate random weight for testing (in grams, with 1 decimal place)
-    const mockWeight = (Math.random() * 4900 + 100).toFixed(1);
-    console.log(`⚖️  Mock weight reading: ${mockWeight}g`);
-
     res.json({
-        weight: parseFloat(mockWeight),
-        status: 'ready',
+        weight: currentWeight,
+        status: scaleStatus,
         timestamp: getCurrentTimestamp()
     });
 });
@@ -2446,7 +2442,7 @@ app.listen(port, () => {
     console.log(`   GET  /api/jobs                   - List all jobs`);
     console.log(`   GET  /api/jobs/:jobNumber        - Get job details`);
     console.log(`   PUT  /api/jobs/:jobNumber/complete - Complete job with final weights`);
-    console.log(`   GET  /api/weight                 - Get current weight (mock)`);
+    console.log(`   GET  /api/weight                 - Get current weight from scale`);
     console.log('🚀 ===============================================');
     console.log('✅ Ready to serve silver polishing requests!');
 });
@@ -2454,6 +2450,10 @@ app.listen(port, () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
     console.log('\n🛑 Shutting down server...');
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (scalePort && scalePort.isOpen) {
+        scalePort.close(() => console.log('⚖️  Scale connection closed'));
+    }
     db.close((err) => {
         if (err) {
             console.error('❌ Error closing database:', err.message);
