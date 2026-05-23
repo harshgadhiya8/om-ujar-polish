@@ -77,6 +77,88 @@ function connectScale() {
 let scalePort = connectScale();
 
 // ============================================================================
+// PRINTER FUNCTION
+// ============================================================================
+
+async function printReceipt(jobData, type) {
+    if (!scalePort || !scalePort.isOpen) {
+        throw new Error('Printer not connected');
+    }
+
+    const ESC = 0x1b;
+    const GS  = 0x1d;
+    const LF  = 0x0a;
+    const WIDTH = 32;
+
+    const cmd = (...bytes) => Buffer.from(bytes);
+    const txt = (str) => Buffer.from(str, 'utf8');
+    const lf  = () => Buffer.from([LF]);
+
+    const INIT      = cmd(ESC, 0x40);
+    const BOLD_ON   = cmd(ESC, 0x45, 0x01);
+    const BOLD_OFF  = cmd(ESC, 0x45, 0x00);
+    const CENTER    = cmd(ESC, 0x61, 0x01);
+    const RIGHT     = cmd(ESC, 0x61, 0x02);
+    const LEFT      = cmd(ESC, 0x61, 0x00);
+    const CUT       = cmd(GS,  0x56, 0x42, 0x00);
+    const DASHES    = txt('-'.repeat(WIDTH));
+
+    const now = new Date();
+    const istDate = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+    const dateStr = istDate.toLocaleDateString('en-IN', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeStr = istDate.toLocaleTimeString('en-IN', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false });
+
+    function row(label, value) {
+        const line = label + value.padStart(WIDTH - label.length);
+        return txt(line.slice(0, WIDTH));
+    }
+
+    function barcode128(data) {
+        const dataBytes = Buffer.from(data, 'utf8');
+        return Buffer.concat([cmd(GS, 0x6b, 0x49, dataBytes.length), dataBytes]);
+    }
+
+    const parts = [INIT];
+
+    // Header
+    parts.push(CENTER, BOLD_ON, txt('Aum Polish'), BOLD_OFF, lf());
+    parts.push(RIGHT, txt(`${dateStr} ${timeStr}`), lf());
+    parts.push(LEFT, DASHES, lf());
+
+    if (type === 'initial') {
+        parts.push(txt(row('Job:', jobData.job_number)), lf());
+        parts.push(txt(row('Customer:', `${jobData.customer_name} (${jobData.customer_id})`)), lf());
+        parts.push(txt(row('Aavak Vajan:', `${Math.floor(jobData.initial_weight)}g`)), lf());
+        parts.push(DASHES, lf());
+        parts.push(CENTER, barcode128(jobData.job_number), lf(), lf());
+    } else {
+        parts.push(txt(row('Customer:', `${jobData.customer_name} (${jobData.customer_id})`)), lf());
+        parts.push(txt(row('Javak Vajan:', `${Math.floor(jobData.final_weight)}g`)), lf());
+        parts.push(txt(row('Aavak Vajan:', `${Math.floor(jobData.initial_weight)}g`)), lf());
+        parts.push(txt(row('Bag Vajan:', `${Math.floor(jobData.plastic_bag_weight)}g`)), lf());
+        parts.push(txt(row('Ghat:', `${Math.floor(jobData.ghat)}g`)), lf());
+        parts.push(txt(row('Fine:', `${Math.floor(jobData.fine_amount)}g`)), lf());
+        parts.push(txt(row('Cust. Bag:', `${Math.floor(jobData.customer_bag_weight || 0)}g`)), lf());
+        parts.push(DASHES, lf());
+        parts.push(CENTER, barcode128(jobData.job_number), lf(), lf());
+    }
+
+    parts.push(CUT);
+
+    const data = Buffer.concat(parts);
+
+    return new Promise((resolve, reject) => {
+        scalePort.write(data, (err) => {
+            if (err) return reject(err);
+            scalePort.drain((err) => {
+                if (err) return reject(err);
+                resolve();
+            });
+        });
+    });
+}
+
+// ============================================================================
 // DATABASE MIGRATION
 // ============================================================================
 
@@ -1090,11 +1172,12 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
     );
 });
 
-// Weight endpoint - reads from live serial port connection
+// Weight endpoint - TEMPORARY mock until weighing machine cable is reconnected
 app.get('/api/weight', (req, res) => {
+    const mockWeight = parseFloat((Math.random() * 4900 + 100).toFixed(1));
     res.json({
-        weight: currentWeight,
-        status: scaleStatus,
+        weight: mockWeight,
+        status: 'ready',
         timestamp: getCurrentTimestamp()
     });
 });
