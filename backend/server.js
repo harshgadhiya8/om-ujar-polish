@@ -2451,16 +2451,26 @@ app.listen(port, () => {
 process.on('SIGINT', () => {
     console.log('\n🛑 Shutting down server...');
     if (reconnectTimer) clearTimeout(reconnectTimer);
+
+    const closeDb = () => {
+        db.close((err) => {
+            if (err) {
+                console.error('❌ Error closing database:', err.message);
+            } else {
+                console.log('✅ Database connection closed');
+            }
+            console.log('👋 Server stopped successfully');
+            process.exit(0);
+        });
+    };
+
     if (scalePort && scalePort.isOpen) {
-        scalePort.close(() => console.log('⚖️  Scale connection closed'));
+        scalePort.removeAllListeners('close');
+        scalePort.close(() => {
+            console.log('⚖️  Scale connection closed');
+            closeDb();
+        });
+    } else {
+        closeDb();
     }
-    db.close((err) => {
-        if (err) {
-            console.error('❌ Error closing database:', err.message);
-        } else {
-            console.log('✅ Database connection closed');
-        }
-        console.log('👋 Server stopped successfully');
-        process.exit(0);
-    });
 });
