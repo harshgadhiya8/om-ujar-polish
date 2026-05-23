@@ -5,6 +5,10 @@ const cors = require('cors');
 const bwipjs = require('bwip-js');
 const path = require('path');
 const PDFDocument = require('pdfkit');
+const ExcelJS = require('exceljs');
+const fs = require('fs');
+const { SerialPort } = require('serialport');
+const { ReadlineParser } = require('@serialport/parser-readline');
 
 // Create Express application
 const app = express();
@@ -28,6 +32,52 @@ const db = new sqlite3.Database(dbPath, (err) => {
         runMigrations();
     }
 });
+
+// Serial port connection for weighing machine
+let currentWeight = 0;
+let scaleStatus = 'disconnected';
+let reconnectTimer = null;
+
+function connectScale() {
+    if (reconnectTimer) {
+        clearInterval(reconnectTimer);
+        reconnectTimer = null;
+    }
+
+    const port = new SerialPort({ path: '/dev/cu.usbserial-140', baudRate: 9600 });
+    const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
+
+    port.on('open', () => {
+        console.log('⚖️  Scale connected on /dev/cu.usbserial-140');
+        scaleStatus = 'ready';
+    });
+
+    parser.on('data', (line) => {
+        const match = line.match(/n\/w:\s*([\d.]+)\s*g/i);
+        if (match) {
+            currentWeight = parseFloat(match[1]);
+        }
+    });
+
+    function onDisconnect(err) {
+        if (err) console.error('❌ Scale error:', err.message);
+        scaleStatus = 'disconnected';
+        if (!reconnectTimer) {
+            console.log('🔄 Scale reconnect scheduled in 5s...');
+            reconnectTimer = setInterval(connectScale, 5000);
+        }
+    }
+
+    port.on('error', onDisconnect);
+    port.on('close', () => {
+        console.log('⚠️  Scale disconnected');
+        onDisconnect(null);
+    });
+
+    return port;
+}
+
+let scalePort = connectScale();
 
 // ============================================================================
 // DATABASE MIGRATION
@@ -94,9 +144,35 @@ function runMigrations() {
                 });
             }
 
-            if (hasWeightCaptures && hasJavakCaptures) {
-                console.log('✅ Database schema up to date');
-            }
+            // Migration 4: Create monthly sequences table for improved job numbering
+            db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='customer_monthly_sequences'", (err, row) => {
+                if (err) {
+                    console.error('❌ Error checking for monthly sequences table:', err);
+                    return;
+                }
+
+                if (!row) {
+                    console.log('➕ Migration 4: Creating monthly sequences table...');
+                    db.run(`
+                        CREATE TABLE customer_monthly_sequences (
+                            customer_id TEXT NOT NULL,
+                            month TEXT NOT NULL,
+                            last_sequence INTEGER DEFAULT 0,
+                            PRIMARY KEY (customer_id, month)
+                        )
+                    `, (err) => {
+                        if (err) {
+                            console.error('❌ Migration 4 failed:', err);
+                        } else {
+                            console.log('✅ Migration 4 complete: Monthly sequences table created');
+                        }
+                    });
+                } else {
+                    if (hasWeightCaptures && hasJavakCaptures) {
+                        console.log('✅ Database schema up to date');
+                    }
+                }
+            });
         });
     });
 }
@@ -189,28 +265,31 @@ function migrateToGramsAndIST() {
 // UTILITY FUNCTIONS
 // ============================================================================
 
-// Base36 conversion for job numbers (supports 1.6M combinations per customer)
-const BASE36_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-function toBase36(num) {
-    if (num === 0) return '0000';
-    let result = '';
-    while (num > 0) {
-        result = BASE36_CHARS[num % 36] + result;
-        num = Math.floor(num / 36);
-    }
-    return result.padStart(4, '0'); // Always 4 characters: 0001, 000A, 0010
+// Format decimal number with leading zeros (e.g., 1 → 00001, 123 → 00123)
+function toDecimal5Digit(num) {
+    return num.toString().padStart(5, '0');
 }
 
-// Generate next job number for a customer
+// Generate next job number for a customer using monthly format: {CUSTOMER_ID}{YYMM}{#####}
+// Example: ABC260500001 (Customer ABC, May 2026, sequence 00001)
+// Supports 99,999 jobs per customer per month, sequence resets monthly
 function generateJobNumber(customerId) {
     return new Promise((resolve, reject) => {
         console.log(`🎯 Generating job number for customer: ${customerId}`);
-        
-        // Get current sequence for this customer
+
+        // Get current month in YYMM format (e.g., "2605" for May 2026)
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+        const istDate = new Date(now.getTime() + istOffset);
+        const year = istDate.getUTCFullYear().toString().slice(-2); // Last 2 digits
+        const month = (istDate.getUTCMonth() + 1).toString().padStart(2, '0');
+        const yearMonth = year + month; // e.g., "2605"
+        const fullMonth = istDate.getUTCFullYear() + '-' + month; // e.g., "2026-05" for storage
+
+        // Get current sequence for this customer in this month
         db.get(
-            'SELECT last_sequence FROM customer_sequences WHERE customer_id = ?',
-            [customerId],
+            'SELECT last_sequence FROM customer_monthly_sequences WHERE customer_id = ? AND month = ?',
+            [customerId, fullMonth],
             (err, row) => {
                 if (err) {
                     console.error('❌ Error reading sequence:', err);
@@ -221,18 +300,25 @@ function generateJobNumber(customerId) {
                 // Calculate next sequence number
                 const currentSequence = row ? row.last_sequence : 0;
                 const nextSequence = currentSequence + 1;
-                
-                // Convert to Base36 format
-                const base36Sequence = toBase36(nextSequence);
-                const jobNumber = customerId + base36Sequence;
 
-                console.log(`📝 Sequence: ${currentSequence} → ${nextSequence} → ${base36Sequence}`);
+                // Check if we've exceeded the monthly limit
+                if (nextSequence > 99999) {
+                    console.error('❌ Monthly sequence limit exceeded (99,999 jobs)');
+                    reject(new Error('Monthly job limit reached for customer ' + customerId));
+                    return;
+                }
+
+                // Format: {CUSTOMER_ID}{YYMM}{#####}
+                const decimalSequence = toDecimal5Digit(nextSequence);
+                const jobNumber = `${customerId}${yearMonth}${decimalSequence}`;
+
+                console.log(`📝 Month: ${fullMonth}, Sequence: ${currentSequence} → ${nextSequence}`);
                 console.log(`🏷️  Job Number: ${jobNumber}`);
 
                 // Update the sequence table
                 db.run(
-                    'INSERT OR REPLACE INTO customer_sequences (customer_id, last_sequence) VALUES (?, ?)',
-                    [customerId, nextSequence],
+                    'INSERT OR REPLACE INTO customer_monthly_sequences (customer_id, month, last_sequence) VALUES (?, ?, ?)',
+                    [customerId, fullMonth, nextSequence],
                     (updateErr) => {
                         if (updateErr) {
                             console.error('❌ Error updating sequence:', updateErr);
@@ -462,14 +548,6 @@ async function generateCompletionReceipt(jobData) {
             doc.text(`${Math.floor(jobData.plastic_bag_weight)} g`, 10, currentY, { width: 207, align: 'right' });
             doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
 
-            // Customer Bag Weight
-            currentY += 18;
-            doc.fontSize(8).font('Helvetica-Bold');
-            doc.text('Customer Bag Weight:', 10, currentY);
-            doc.font('Helvetica');
-            doc.text(`${Math.floor(jobData.customer_bag_weight)} g`, 10, currentY, { width: 207, align: 'right' });
-            doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
-
             // Ghat
             currentY += 18;
             doc.fontSize(8).font('Helvetica-Bold');
@@ -501,6 +579,13 @@ async function generateCompletionReceipt(jobData) {
                     console.error('Error adding barcode to PDF:', err);
                 }
             }
+
+            // Customer Bag Weight — informational, bottom right, after barcode
+            const bagLabelY = bottomY + 48;
+            doc.fontSize(7).font('Helvetica-Bold');
+            doc.text('Cust. Bag:', 10, bagLabelY, { width: 207, align: 'right' });
+            doc.font('Helvetica');
+            doc.text(`${Math.floor(jobData.customer_bag_weight || 0)} g`, 10, bagLabelY + 9, { width: 207, align: 'right' });
 
             doc.end();
         } catch (err) {
@@ -873,8 +958,9 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
         return res.status(400).json({ error: 'Bag Vajan is required' });
     }
 
+    // customer_bag_weight is informational only, default to 0
     if (customer_bag_weight === undefined || customer_bag_weight === null) {
-        return res.status(400).json({ error: 'Customer Bag Weight is required' });
+        customer_bag_weight = 0;
     }
 
     // Ghat is optional, default to 0 if not provided
@@ -917,17 +1003,16 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
                 });
             }
 
-            // Calculate fine: Javak - Aavak - Bag - Customer_Bag + Ghat
+            // Calculate fine: Javak - Aavak - Bag + Ghat (customer_bag_weight is informational only)
             const aavakVajan = parseFloat(job.initial_weight);
-            const fineAmount = totalJavakVajan - aavakVajan - bagVajanNum - customerBagWeightNum + ghatNum;
+            const fineAmount = totalJavakVajan - aavakVajan - bagVajanNum + ghatNum;
 
             console.log(`📊 Fine Calculation:`);
             console.log(`  Javak Vajan: ${totalJavakVajan}g`);
             console.log(`  Aavak Vajan: ${aavakVajan}g`);
             console.log(`  Bag Vajan: ${bagVajanNum}g`);
-            console.log(`  Customer Bag Weight: ${customerBagWeightNum}g`);
             console.log(`  Ghat: ${ghatNum}g`);
-            console.log(`  Fine: ${fineAmount}g (${totalJavakVajan} - ${aavakVajan} - ${bagVajanNum} - ${customerBagWeightNum} + ${ghatNum})`);
+            console.log(`  Fine: ${fineAmount}g (${totalJavakVajan} - ${aavakVajan} - ${bagVajanNum} + ${ghatNum})`);
 
             // Calculate current IST timestamp
             const now = new Date();
@@ -1319,10 +1404,19 @@ async function generateLedgerPDF(startDate, endDate, jobs, totals, columns, res)
 app.get('/api/customers/:customerId/next-job-number', (req, res) => {
     const { customerId } = req.params;
     console.log(`🔮 Previewing next job number for: ${customerId}`);
-    
+
+    // Get current month in YYMM format
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+    const istDate = new Date(now.getTime() + istOffset);
+    const year = istDate.getUTCFullYear().toString().slice(-2);
+    const month = (istDate.getUTCMonth() + 1).toString().padStart(2, '0');
+    const yearMonth = year + month;
+    const fullMonth = istDate.getUTCFullYear() + '-' + month;
+
     db.get(
-        'SELECT last_sequence FROM customer_sequences WHERE customer_id = ?',
-        [customerId],
+        'SELECT last_sequence FROM customer_monthly_sequences WHERE customer_id = ? AND month = ?',
+        [customerId, fullMonth],
         (err, row) => {
             if (err) {
                 console.error('❌ Error reading sequence:', err);
@@ -1330,9 +1424,9 @@ app.get('/api/customers/:customerId/next-job-number', (req, res) => {
             } else {
                 const currentSequence = row ? row.last_sequence : 0;
                 const nextSequence = currentSequence + 1;
-                const base36Sequence = toBase36(nextSequence);
-                const nextJobNumber = customerId + base36Sequence;
-                
+                const decimalSequence = toDecimal5Digit(nextSequence);
+                const nextJobNumber = `${customerId}${yearMonth}${decimalSequence}`;
+
                 console.log(`🔮 Next job number will be: ${nextJobNumber}`);
                 res.json({ next_job_number: nextJobNumber });
             }
@@ -2033,6 +2127,306 @@ async function generateCustomerLedgerPDF(customerData, jobs, totals, view, res) 
         console.error('❌ Error generating PDF:', err);
         res.status(500).json({ error: 'Failed to generate PDF ledger' });
     }
+}
+
+// ============================================================================
+// MONTHLY ARCHIVE - EXCEL EXPORT
+// ============================================================================
+
+// Preview archive (GET) or Generate Excel files (POST)
+app.all('/api/archive/monthly', async (req, res) => {
+    try {
+        const { month } = req.method === 'POST' ? req.body : req.query;
+        const deleteAfterExport = req.method === 'POST' ? (req.body.deleteAfterExport === true) : false;
+
+        console.log(`📦 Archive request for month: ${month}, delete: ${deleteAfterExport}`);
+
+        // Validate month format (YYYY-MM)
+        const monthPattern = /^\d{4}-\d{2}$/;
+        if (!month || !monthPattern.test(month)) {
+            return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM (e.g., 2026-04)' });
+        }
+
+        // GET: Preview only
+        if (req.method === 'GET') {
+            const preview = await getArchivePreview(month);
+            return res.json(preview);
+        }
+
+        // POST: Generate Excel files
+        const result = await generateMonthlyExcelArchive(month, deleteAfterExport);
+        res.json(result);
+
+    } catch (err) {
+        console.error('❌ Archive error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get preview of what will be archived
+async function getArchivePreview(month) {
+    return new Promise((resolve, reject) => {
+        const query = `
+            SELECT
+                c.customer_id,
+                c.name as customer_name,
+                COUNT(j.id) as job_count,
+                SUM(j.initial_weight) as total_aavak,
+                SUM(j.final_weight) as total_javak
+            FROM jobs j
+            JOIN customers c ON j.customer_id = c.customer_id
+            WHERE j.status = 'completed'
+              AND strftime('%Y-%m', j.delivered_at) = ?
+            GROUP BY c.customer_id, c.name
+            ORDER BY c.name ASC
+        `;
+
+        db.all(query, [month], (err, customers) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+
+            const totalJobs = customers.reduce((sum, c) => sum + c.job_count, 0);
+            const totalCustomers = customers.length;
+
+            resolve({
+                month,
+                month_display: formatMonthDisplay(month),
+                total_customers: totalCustomers,
+                total_jobs: totalJobs,
+                customers: customers.map(c => ({
+                    customer_id: c.customer_id,
+                    customer_name: c.customer_name,
+                    job_count: c.job_count,
+                    total_aavak: Math.floor(c.total_aavak || 0),
+                    total_javak: Math.floor(c.total_javak || 0)
+                }))
+            });
+        });
+    });
+}
+
+// Generate Excel files for each customer
+async function generateMonthlyExcelArchive(month, deleteAfterExport) {
+    // Create archive directory
+    const archiveDir = path.join(__dirname, 'archives', month);
+    if (!fs.existsSync(archiveDir)) {
+        fs.mkdirSync(archiveDir, { recursive: true });
+    }
+
+    console.log(`📁 Archive directory: ${archiveDir}`);
+
+    // Get all customers with completed jobs in this month
+    const preview = await getArchivePreview(month);
+
+    if (preview.total_customers === 0) {
+        throw new Error(`No completed jobs found for ${month}`);
+    }
+
+    const generatedFiles = [];
+
+    // Generate Excel file for each customer
+    for (const customerInfo of preview.customers) {
+        const filename = await generateCustomerExcel(month, customerInfo.customer_id, archiveDir);
+        generatedFiles.push({
+            customer_id: customerInfo.customer_id,
+            customer_name: customerInfo.customer_name,
+            filename: path.basename(filename),
+            job_count: customerInfo.job_count
+        });
+    }
+
+    // Optionally delete jobs after successful export
+    if (deleteAfterExport) {
+        await deleteArchivedJobs(month);
+    }
+
+    return {
+        success: true,
+        month,
+        month_display: formatMonthDisplay(month),
+        total_customers: preview.total_customers,
+        total_jobs: preview.total_jobs,
+        archive_path: archiveDir,
+        files: generatedFiles,
+        deleted: deleteAfterExport
+    };
+}
+
+// Generate Excel file for a single customer
+async function generateCustomerExcel(month, customerId, archiveDir) {
+    return new Promise((resolve, reject) => {
+        // Get customer info and jobs
+        const customerQuery = `
+            SELECT c.customer_id, c.name, c.phone, c.address
+            FROM customers c
+            WHERE c.customer_id = ?
+        `;
+
+        const jobsQuery = `
+            SELECT
+                j.job_number,
+                j.delivered_at,
+                j.initial_weight as aavak_vajan,
+                j.final_weight as javak_vajan,
+                j.plastic_bag_weight as bag_vajan,
+                j.customer_bag_weight,
+                j.ghat,
+                j.fine_amount as fine,
+                j.fine_based_charge,
+                j.total_amount,
+                j.status
+            FROM jobs j
+            WHERE j.customer_id = ?
+              AND j.status = 'completed'
+              AND strftime('%Y-%m', j.delivered_at) = ?
+            ORDER BY j.delivered_at ASC
+        `;
+
+        db.get(customerQuery, [customerId], async (err, customer) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+
+            db.all(jobsQuery, [customerId, month], async (err, jobs) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+
+                try {
+                    // Create Excel workbook
+                    const workbook = new ExcelJS.Workbook();
+
+                    // Sheet 1: Customer Info
+                    const infoSheet = workbook.addWorksheet('Customer Info');
+                    infoSheet.columns = [
+                        { header: 'Field', key: 'field', width: 20 },
+                        { header: 'Value', key: 'value', width: 40 }
+                    ];
+
+                    infoSheet.addRows([
+                        { field: 'Customer ID', value: customer.customer_id },
+                        { field: 'Name', value: customer.name },
+                        { field: 'Phone', value: customer.phone || 'N/A' },
+                        { field: 'Address', value: customer.address || 'N/A' },
+                        { field: 'Month', value: formatMonthDisplay(month) },
+                        { field: 'Total Jobs', value: jobs.length },
+                        { field: 'Total Weight Processed (g)', value: Math.floor(jobs.reduce((sum, j) => sum + (j.aavak_vajan || 0), 0)) }
+                    ]);
+
+                    // Style header row
+                    infoSheet.getRow(1).font = { bold: true };
+                    infoSheet.getRow(1).fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FF4CAF50' }
+                    };
+
+                    // Sheet 2: Jobs Detail
+                    const jobsSheet = workbook.addWorksheet('Jobs Detail');
+                    jobsSheet.columns = [
+                        { header: 'Job Number', key: 'job_number', width: 18 },
+                        { header: 'Date', key: 'date', width: 12 },
+                        { header: 'Aavak Vajan (g)', key: 'aavak_vajan', width: 15 },
+                        { header: 'Javak Vajan (g)', key: 'javak_vajan', width: 15 },
+                        { header: 'Bag Vajan (g)', key: 'bag_vajan', width: 14 },
+                        { header: 'Customer Bag (g)', key: 'customer_bag', width: 16 },
+                        { header: 'Ghat (g)', key: 'ghat', width: 10 },
+                        { header: 'Fine (g)', key: 'fine', width: 10 },
+                        { header: 'Status', key: 'status', width: 12 }
+                    ];
+
+                    // Add job rows
+                    jobs.forEach(job => {
+                        jobsSheet.addRow({
+                            job_number: job.job_number,
+                            date: job.delivered_at ? new Date(job.delivered_at).toLocaleDateString('en-IN') : '',
+                            aavak_vajan: Math.floor(job.aavak_vajan || 0),
+                            javak_vajan: Math.floor(job.javak_vajan || 0),
+                            bag_vajan: Math.floor(job.bag_vajan || 0),
+                            customer_bag: Math.floor(job.customer_bag_weight || 0),
+                            ghat: Math.floor(job.ghat || 0),
+                            fine: Math.floor(job.fine || 0),
+                            status: job.status
+                        });
+                    });
+
+                    // Add totals row
+                    const totalsRow = jobsSheet.addRow({
+                        job_number: 'TOTAL',
+                        date: '',
+                        aavak_vajan: Math.floor(jobs.reduce((sum, j) => sum + (j.aavak_vajan || 0), 0)),
+                        javak_vajan: Math.floor(jobs.reduce((sum, j) => sum + (j.javak_vajan || 0), 0)),
+                        bag_vajan: Math.floor(jobs.reduce((sum, j) => sum + (j.bag_vajan || 0), 0)),
+                        customer_bag: Math.floor(jobs.reduce((sum, j) => sum + (j.customer_bag_weight || 0), 0)),
+                        ghat: Math.floor(jobs.reduce((sum, j) => sum + (j.ghat || 0), 0)),
+                        fine: Math.floor(jobs.reduce((sum, j) => sum + (j.fine || 0), 0)),
+                        status: ''
+                    });
+
+                    // Style header row
+                    jobsSheet.getRow(1).font = { bold: true };
+                    jobsSheet.getRow(1).fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FF2196F3' }
+                    };
+
+                    // Style totals row
+                    totalsRow.font = { bold: true };
+                    totalsRow.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFFFEB3B' }
+                    };
+
+                    // Save file
+                    const monthName = formatMonthDisplay(month).replace(' ', '-');
+                    const filename = path.join(archiveDir, `${customer.customer_id}-${monthName}.xlsx`);
+
+                    await workbook.xlsx.writeFile(filename);
+                    console.log(`✅ Generated: ${path.basename(filename)}`);
+
+                    resolve(filename);
+                } catch (excelErr) {
+                    reject(excelErr);
+                }
+            });
+        });
+    });
+}
+
+// Delete archived jobs
+async function deleteArchivedJobs(month) {
+    return new Promise((resolve, reject) => {
+        const query = `
+            DELETE FROM jobs
+            WHERE status = 'completed'
+              AND strftime('%Y-%m', delivered_at) = ?
+        `;
+
+        db.run(query, [month], function(err) {
+            if (err) {
+                reject(err);
+                return;
+            }
+            console.log(`🗑️  Deleted ${this.changes} jobs from ${month}`);
+            resolve(this.changes);
+        });
+    });
+}
+
+// Helper function to format month for display
+function formatMonthDisplay(monthStr) {
+    const [year, month] = monthStr.split('-');
+    const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return `${monthNames[parseInt(month) - 1]} ${year}`;
 }
 
 // ============================================================================
