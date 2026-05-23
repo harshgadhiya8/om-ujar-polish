@@ -43,6 +43,7 @@ function connectScale() {
 
     port.on('error', (err) => {
         console.error('❌ Scale error:', err.message);
+        port.destroy();
     });
 
     const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
@@ -62,8 +63,8 @@ function connectScale() {
     port.on('close', () => {
         console.log('⚠️  Scale disconnected');
         scaleStatus = 'disconnected';
-        port.destroy();
-        console.log('🔄 Scale reconnect scheduled in 5s...');
+        currentWeight = 0;
+        if (reconnectTimer) return;
         reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
             scalePort = connectScale();
