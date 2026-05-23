@@ -39,12 +39,12 @@ let scaleStatus = 'disconnected';
 let reconnectTimer = null;
 
 function connectScale() {
-    if (reconnectTimer) {
-        clearInterval(reconnectTimer);
-        reconnectTimer = null;
-    }
-
     const port = new SerialPort({ path: '/dev/cu.usbserial-140', baudRate: 9600 });
+
+    port.on('error', (err) => {
+        console.error('❌ Scale error:', err.message);
+    });
+
     const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
 
     port.on('open', () => {
@@ -59,19 +59,15 @@ function connectScale() {
         }
     });
 
-    function onDisconnect(err) {
-        if (err) console.error('❌ Scale error:', err.message);
-        scaleStatus = 'disconnected';
-        if (!reconnectTimer) {
-            console.log('🔄 Scale reconnect scheduled in 5s...');
-            reconnectTimer = setInterval(connectScale, 5000);
-        }
-    }
-
-    port.on('error', onDisconnect);
     port.on('close', () => {
         console.log('⚠️  Scale disconnected');
-        onDisconnect(null);
+        scaleStatus = 'disconnected';
+        port.destroy();
+        console.log('🔄 Scale reconnect scheduled in 5s...');
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            scalePort = connectScale();
+        }, 5000);
     });
 
     return port;
