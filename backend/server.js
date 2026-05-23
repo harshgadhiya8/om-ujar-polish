@@ -866,11 +866,25 @@ app.post('/api/jobs/initial', async (req, res) => {
                                 res.status(500).json({ error: err.message });
                             } else {
                                 console.log('📋 Returning complete job details');
-                                res.json({
-                                    success: true,
-                                    job: row,
-                                    message: `Job ${jobNumber} created successfully!`
-                                });
+                                printReceipt(row, 'initial')
+                                    .then(() => {
+                                        console.log(`🖨️  Receipt printed for job ${jobNumber}`);
+                                        res.json({
+                                            success: true,
+                                            job: row,
+                                            message: `Job ${jobNumber} created successfully!`,
+                                            printError: null
+                                        });
+                                    })
+                                    .catch((printErr) => {
+                                        console.error('❌ Print error:', printErr.message);
+                                        res.json({
+                                            success: true,
+                                            job: row,
+                                            message: `Job ${jobNumber} created successfully!`,
+                                            printError: printErr.message
+                                        });
+                                    });
                             }
                         }
                     );
@@ -1171,6 +1185,34 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
                     );
                 }
             );
+        }
+    );
+});
+
+// Reprint receipt for a job
+app.post('/api/jobs/:jobNumber/reprint', (req, res) => {
+    const { jobNumber } = req.params;
+    console.log(`🖨️  Reprint requested for job: ${jobNumber}`);
+
+    db.get(
+        `SELECT j.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address
+         FROM jobs j
+         JOIN customers c ON j.customer_id = c.customer_id
+         WHERE j.job_number = ?`,
+        [jobNumber],
+        async (err, job) => {
+            if (err) return res.status(500).json({ success: false, error: err.message });
+            if (!job) return res.status(404).json({ success: false, error: 'Job not found' });
+
+            const type = job.delivered_at ? 'completion' : 'initial';
+            try {
+                await printReceipt(job, type);
+                console.log(`✅ Reprint successful for job ${jobNumber}`);
+                res.json({ success: true });
+            } catch (printErr) {
+                console.error(`❌ Reprint failed for job ${jobNumber}:`, printErr.message);
+                res.json({ success: false, error: printErr.message });
+            }
         }
     );
 });
