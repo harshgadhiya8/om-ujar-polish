@@ -43,7 +43,7 @@ function connectScale() {
 
     port.on('error', (err) => {
         console.error('❌ Scale error:', err.message);
-        port.destroy();
+        if (port.isOpen) port.close();
     });
 
     const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
