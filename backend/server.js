@@ -1180,7 +1180,15 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
                                 }
                             };
 
-                            res.json(response);
+                            printReceipt(updatedJob, 'completion')
+                                .then(() => {
+                                    console.log(`🖨️  Completion receipt printed for job ${jobNumber}`);
+                                    res.json({ ...response, printError: null });
+                                })
+                                .catch((printErr) => {
+                                    console.error('❌ Print error:', printErr.message);
+                                    res.json({ ...response, printError: printErr.message });
+                                });
                         }
                     );
                 }
