@@ -54,7 +54,7 @@ function connectScale() {
     });
 
     parser.on('data', (line) => {
-        const match = line.match(/n\/w:\s*([\d.]+)\s*g/i);
+        const match = line.match(/n[\/\\]w:\s*([\d.]+)\s*g/i);
         if (match) {
             currentWeight = parseFloat(match[1]);
         }
