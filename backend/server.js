@@ -82,7 +82,7 @@ let scalePort = connectScale();
 
 async function printReceipt(jobData, type) {
     if (!scalePort || !scalePort.isOpen) {
-        throw new Error('Printer not connected');
+        throw new Error('Scale/printer not connected');
     }
 
     const ESC = 0x1b;
@@ -110,7 +110,10 @@ async function printReceipt(jobData, type) {
 
     function row(label, value) {
         const line = label + value.padStart(WIDTH - label.length);
-        return txt(line.slice(0, WIDTH));
+        if (line.length > WIDTH) {
+            console.warn(`⚠️  Receipt row truncated: "${line}" (${line.length} > ${WIDTH} chars)`);
+        }
+        return line.slice(0, WIDTH);
     }
 
     function barcode128(data) {
