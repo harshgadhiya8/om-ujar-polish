@@ -1,0 +1,683 @@
+/* CustomerLedger Container */
+.customer-ledger {
+    padding: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.customer-ledger h2 {
+    color: #333;
+    margin-bottom: 20px;
+    font-size: 28px;
+}
+
+.customer-ledger h3 {
+    color: #555;
+    margin-top: 20px;
+    margin-bottom: 15px;
+    font-size: 18px;
+}
+
+/* Customer Selection Section */
+.customer-selection-section {
+    background: #f9f9f9;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 30px;
+    border: 1px solid #e0e0e0;
+}
+
+/* Searchable Dropdown */
+.searchable-dropdown {
+    position: relative;
+    width: 100%;
+    max-width: 600px;
+}
+
+.search-input {
+    width: 100%;
+    padding: 12px 15px;
+    font-size: 16px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    box-sizing: border-box;
+    transition: all 0.3s ease;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: #4CAF50;
+    box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
+    background-color: #fafafa;
+}
+
+.hint-text {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #666;
+    font-style: italic;
+}
+
+/* Dropdown Menu */
+.dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 400px;
+    overflow-y: auto;
+    background: white;
+    border: 2px solid #4CAF50;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    margin-top: 4px;
+}
+
+.dropdown-item {
+    padding: 12px 15px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.2s ease;
+}
+
+.dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.dropdown-item:hover {
+    background-color: #f0f7f0;
+}
+
+.dropdown-item.empty {
+    cursor: default;
+    color: #999;
+    text-align: center;
+    padding: 20px;
+}
+
+.dropdown-item.empty:hover {
+    background-color: white;
+}
+
+.item-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.item-name {
+    font-weight: 600;
+    color: #333;
+    font-size: 15px;
+}
+
+.item-id {
+    font-size: 13px;
+    color: #666;
+    background: #e8f5e9;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.item-details {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: #666;
+    margin-top: 4px;
+}
+
+/* Customer List Container */
+.customer-list-container {
+    background: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    margin-bottom: 30px;
+}
+
+/* Customer Cards Grid */
+.customer-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+/* Customer Card */
+.customer-card {
+    background: #ffffff;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.customer-card:hover {
+    border-color: #4CAF50;
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.2);
+    transform: translateY(-2px);
+}
+
+.customer-card.selected {
+    border-color: #4CAF50;
+    background-color: #f0f7f0;
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+/* Card Header */
+.card-header {
+    margin-bottom: 12px;
+    border-bottom: 2px solid #f0f0f0;
+    padding-bottom: 10px;
+}
+
+.card-header h4 {
+    margin: 0 0 5px 0;
+    color: #333;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.customer-id {
+    font-size: 12px;
+    color: #999;
+    font-weight: 500;
+}
+
+/* Card Body */
+.card-body {
+    font-size: 14px;
+}
+
+.card-body p {
+    margin: 8px 0;
+    color: #666;
+}
+
+.card-body strong {
+    color: #333;
+}
+
+/* Error State */
+.error {
+    background-color: #ffebee;
+    color: #c62828;
+    padding: 15px;
+    border-radius: 6px;
+    border-left: 4px solid #c62828;
+    margin-bottom: 20px;
+    font-size: 14px;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #999;
+    font-size: 16px;
+}
+
+.empty-state p {
+    margin: 0;
+}
+
+/* Loading State */
+.loading {
+    text-align: center;
+    color: #666;
+    padding: 20px;
+    font-size: 16px;
+}
+
+/* Back Button */
+.back-button {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-bottom: 15px;
+    transition: background 0.3s ease;
+}
+
+.back-button:hover {
+    background: #5a6268;
+}
+
+/* Month Selection Section */
+.month-selection-section {
+    background: #ffffff;
+    padding: 25px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    margin-bottom: 30px;
+}
+
+.customer-header {
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.customer-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 20px;
+}
+
+/* Month Selection Container */
+.month-selection-container {
+    background: #f9f9f9;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+}
+
+.month-selection-container h4 {
+    margin: 0 0 20px 0;
+    color: #555;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+/* Quick Selection Buttons */
+.quick-selection {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 25px;
+}
+
+.quick-button {
+    flex: 1;
+    padding: 12px 20px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.quick-button:hover {
+    background: #45a049;
+    box-shadow: 0 4px 8px rgba(76, 175, 80, 0.2);
+    transform: translateY(-2px);
+}
+
+.quick-button:active {
+    transform: translateY(0);
+}
+
+/* Custom Selection */
+.custom-selection {
+    background: #ffffff;
+    padding: 20px;
+    border-radius: 6px;
+    border: 1px solid #e0e0e0;
+}
+
+.selection-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.selection-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.selection-group label {
+    margin-bottom: 8px;
+    color: #555;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.month-dropdown,
+.year-dropdown {
+    padding: 10px 12px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    background: white;
+    color: #333;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.month-dropdown:hover,
+.year-dropdown:hover {
+    border-color: #4CAF50;
+}
+
+.month-dropdown:focus,
+.year-dropdown:focus {
+    outline: none;
+    border-color: #4CAF50;
+    box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
+    background-color: #fafafa;
+}
+
+/* Show Ledger Button */
+.show-ledger-button {
+    width: 100%;
+    padding: 12px 20px;
+    background: #2196F3;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.show-ledger-button:hover:not(:disabled) {
+    background: #0b7dda;
+    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
+    transform: translateY(-2px);
+}
+
+.show-ledger-button:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.show-ledger-button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+/* Validation Error */
+.validation-error {
+    margin-top: 15px;
+    padding: 12px 15px;
+    background: #ffebee;
+    color: #c62828;
+    border-radius: 6px;
+    border-left: 4px solid #c62828;
+    font-size: 14px;
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Month Selection Placeholder */
+.month-selection-placeholder {
+    background: #fffacd;
+    border: 2px dashed #f0ad4e;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 30px;
+    color: #8a6d3b;
+}
+
+.month-selection-placeholder h3,
+.month-selection-placeholder p {
+    margin: 0;
+}
+
+.month-selection-placeholder p {
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+/* Ledger Container */
+.ledger-container {
+    background: #ffffff;
+    padding: 25px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    margin-bottom: 30px;
+}
+
+/* Ledger Header */
+.ledger-header {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 25px;
+    justify-content: flex-start;
+    align-items: center;
+}
+
+.change-month-button {
+    background: #ff9800;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.3s ease;
+}
+
+.change-month-button:hover {
+    background: #e68900;
+}
+
+/* Ledger Heading */
+.ledger-heading {
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.ledger-heading h3 {
+    margin: 0 0 10px 0;
+    color: #333;
+    font-size: 22px;
+}
+
+.ledger-info {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.ledger-info p {
+    margin: 0;
+    color: #666;
+    font-size: 15px;
+}
+
+/* View Mode Toggle */
+.view-mode-toggle {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 25px;
+}
+
+.toggle-button {
+    padding: 10px 20px;
+    background: #f0f0f0;
+    color: #333;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.toggle-button:hover {
+    border-color: #2196F3;
+    background: #f5f5f5;
+}
+
+.toggle-button.active {
+    background: #2196F3;
+    color: white;
+    border-color: #2196F3;
+}
+
+/* Job Table Wrapper */
+.job-table-wrapper {
+    overflow-x: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+}
+
+/* Job Table */
+.job-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.job-table thead {
+    background: #f8f8f8;
+    position: sticky;
+    top: 0;
+}
+
+.job-table th {
+    padding: 12px 15px;
+    text-align: left;
+    font-weight: 600;
+    color: #333;
+    border-bottom: 2px solid #ddd;
+    white-space: nowrap;
+}
+
+.job-table th.numeric {
+    text-align: right;
+    padding-right: 25px;
+}
+
+.job-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #555;
+}
+
+.job-table td.numeric {
+    text-align: right;
+    padding-right: 25px;
+    font-family: 'Courier New', monospace;
+}
+
+.job-table td.negative {
+    color: #d32f2f;
+    font-weight: 500;
+}
+
+.job-table tbody tr:hover {
+    background: #f9f9f9;
+}
+
+.job-table tfoot {
+    background: #f8f8f8;
+    font-weight: 600;
+    border-top: 2px solid #333;
+}
+
+.job-table tfoot tr {
+    border-bottom: 2px solid #333;
+}
+
+.job-table tfoot td {
+    padding: 15px;
+    color: #333;
+}
+
+.job-table tfoot td.negative {
+    color: #d32f2f;
+}
+
+/* Job Table Placeholder (legacy) */
+.job-table-placeholder {
+    background: #fffacd;
+    border: 2px dashed #f0ad4e;
+    border-radius: 8px;
+    padding: 20px;
+    color: #8a6d3b;
+}
+
+.job-table-placeholder h3,
+.job-table-placeholder p {
+    margin: 0;
+}
+
+.job-table-placeholder p {
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+/* Download Buttons */
+.download-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.download-buttons button {
+    padding: 10px 20px;
+    background: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.download-buttons button:hover {
+    background: #5a6268;
+}
+
+.download-buttons button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .customer-cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 12px;
+    }
+
+    .customer-ledger {
+        padding: 15px;
+    }
+
+    .customer-ledger h2 {
+        font-size: 24px;
+    }
+
+    .customer-ledger h3 {
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 480px) {
+    .customer-cards-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .search-input {
+        padding: 10px 12px;
+        font-size: 14px;
+    }
+}
