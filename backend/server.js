@@ -40,9 +40,37 @@ const db = new sqlite3.Database(dbPath, (err) => {
 let currentWeight = 0;
 let scaleStatus = 'disconnected';
 let reconnectTimer = null;
+let scalePort = null;
 
-function connectScale() {
-    const port = new SerialPort({ path: '/dev/cu.usbserial-3140', baudRate: 9600 });
+function scheduleReconnect() {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connectScale();
+    }, 5000);
+}
+
+async function connectScale() {
+    // Auto-discover the USB serial port — works on any Mac regardless of assigned path
+    let portPath;
+    try {
+        const ports = await SerialPort.list();
+        const found = ports.find(p =>
+            p.path.includes('usbserial') || p.path.includes('usbmodem')
+        );
+        if (!found) {
+            console.log('⚠️  Scale not found on any USB port, retrying in 5s...');
+            scheduleReconnect();
+            return;
+        }
+        portPath = found.path;
+    } catch (err) {
+        console.error('❌ Could not list serial ports:', err.message);
+        scheduleReconnect();
+        return;
+    }
+
+    const port = new SerialPort({ path: portPath, baudRate: 9600 });
 
     port.on('error', (err) => {
         console.error('❌ Scale error:', err.message);
@@ -52,7 +80,7 @@ function connectScale() {
     const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
 
     port.on('open', () => {
-        console.log('⚖️  Scale connected on /dev/cu.usbserial-3140');
+        console.log(`⚖️  Scale connected on ${portPath}`);
         scaleStatus = 'ready';
     });
 
@@ -67,17 +95,14 @@ function connectScale() {
         console.log('⚠️  Scale disconnected');
         scaleStatus = 'disconnected';
         currentWeight = 0;
-        if (reconnectTimer) return;
-        reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            scalePort = connectScale();
-        }, 5000);
+        scalePort = null;
+        scheduleReconnect();
     });
 
-    return port;
+    scalePort = port;
 }
 
-let scalePort = connectScale();
+connectScale();
 
 // ============================================================================
 // PRINTER FUNCTION
