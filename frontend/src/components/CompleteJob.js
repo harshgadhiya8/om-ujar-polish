@@ -26,12 +26,31 @@ const CompleteJob = () => {
     const [printError, setPrintError] = useState(null);
     const [reprinting, setReprinting] = useState(false);
 
-    const API_BASE = 'http://localhost:3001';
+    const API_BASE = window.location.port === '3001'
+        ? window.location.origin
+        : `${window.location.protocol}//${window.location.hostname}:3001`;
 
-    // Start weight polling on component mount
+    // Start weight polling and scan listener on component mount
     useEffect(() => {
         console.log('🚀 CompleteJob component loaded');
         startWeightPolling();
+
+        const es = new EventSource(`${API_BASE}/api/scan/listen`);
+        es.onmessage = async (e) => {
+            try {
+                const { job_number } = JSON.parse(e.data);
+                setSearchQuery(job_number);
+                setLoading(true);
+                const response = await axios.get(`${API_BASE}/api/jobs/${job_number.toUpperCase()}`);
+                setJob(response.data);
+                showMessage(`Job ${response.data.job_number} loaded from scan`, 'success');
+            } catch (err) {
+                showMessage('Scan received but job not found', 'error');
+            } finally {
+                setLoading(false);
+            }
+        };
+        return () => es.close();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -59,22 +78,23 @@ const CompleteJob = () => {
         }, 5000);
     };
 
-    // Search for job by job number
-    const handleSearch = async () => {
-        if (!searchQuery.trim()) {
+    // Search for job by job number (accepts optional direct value from scanner)
+    const handleSearch = async (directJobNumber) => {
+        const query = directJobNumber || searchQuery;
+        if (!query.trim()) {
             showMessage('Please enter a job number', 'warning');
             return;
         }
 
         setLoading(true);
         try {
-            const response = await axios.get(`${API_BASE}/api/jobs/${searchQuery.toUpperCase()}`);
+            const response = await axios.get(`${API_BASE}/api/jobs/${query.toUpperCase()}`);
             setJob(response.data);
             showMessage(`Job ${response.data.job_number} loaded successfully`, 'success');
         } catch (error) {
             console.error('Error searching for job:', error);
             if (error.response?.status === 404) {
-                showMessage(`Job ${searchQuery.toUpperCase()} not found`, 'error');
+                showMessage(`Job ${query.toUpperCase()} not found`, 'error');
             } else {
                 showMessage('Error loading job. Please try again.', 'error');
             }
@@ -83,6 +103,7 @@ const CompleteJob = () => {
             setLoading(false);
         }
     };
+
 
     // Clear search and reset form
     const handleClearSearch = () => {
@@ -358,7 +379,7 @@ const CompleteJob = () => {
                     />
                     <button
                         className="btn-primary"
-                        onClick={handleSearch}
+                        onClick={() => handleSearch()}
                         disabled={loading}
                     >
                         {loading ? 'Searching...' : 'Search'}
@@ -454,9 +475,11 @@ const CompleteJob = () => {
                                                         <div className="edit-weight">
                                                             <input
                                                                 type="number"
-                                                                step="0.1"
+                                                                step="1"
                                                                 value={editWeight}
                                                                 onChange={(e) => setEditWeight(e.target.value)}
+                                                                min="0"
+                                            onKeyDown={(e) => (e.key === '.' || e.key === ',' || e.key === '-' || e.key === 'e' || e.key === 'E') && e.preventDefault()}
                                                                 autoFocus
                                                             />
                                                             <button onClick={saveEditJavakWeight} className="btn-save">✓</button>
@@ -464,7 +487,7 @@ const CompleteJob = () => {
                                                         </div>
                                                     ) : (
                                                         <div className="weight-item">
-                                                            <span>{weight.toFixed(1)} g (floored: {Math.floor(weight)} g)</span>
+                                                            <span>{Math.floor(weight)} g</span>
                                                             <button onClick={() => startEditJavakWeight(index)} className="btn-edit">✏️</button>
                                                             <button onClick={() => removeJavakWeight(index)} className="btn-remove">🗑️</button>
                                                         </div>
@@ -489,10 +512,12 @@ const CompleteJob = () => {
                                     <div className="weight-input-group">
                                         <input
                                             type="number"
-                                            step="0.1"
+                                            step="1"
                                             value={bagVajan}
                                             onChange={(e) => setBagVajan(e.target.value)}
-                                            placeholder="0.0"
+                                            min="0"
+                                            onKeyDown={(e) => (e.key === '.' || e.key === ',' || e.key === '-' || e.key === 'e' || e.key === 'E') && e.preventDefault()}
+                                            placeholder="0"
                                             className="weight-input"
                                         />
                                         <span className="unit">g</span>
@@ -511,10 +536,12 @@ const CompleteJob = () => {
                                     <div className="weight-input-group">
                                         <input
                                             type="number"
-                                            step="0.1"
+                                            step="1"
                                             value={customerBagWeight}
                                             onChange={(e) => setCustomerBagWeight(e.target.value)}
-                                            placeholder="0.0"
+                                            min="0"
+                                            onKeyDown={(e) => (e.key === '.' || e.key === ',' || e.key === '-' || e.key === 'e' || e.key === 'E') && e.preventDefault()}
+                                            placeholder="0"
                                             className="weight-input"
                                         />
                                         <span className="unit">g</span>
@@ -527,10 +554,12 @@ const CompleteJob = () => {
                                     <div className="weight-input-group">
                                         <input
                                             type="number"
-                                            step="0.1"
+                                            step="1"
                                             value={ghat}
                                             onChange={(e) => setGhat(e.target.value)}
-                                            placeholder="0.0"
+                                            min="0"
+                                            onKeyDown={(e) => (e.key === '.' || e.key === ',' || e.key === '-' || e.key === 'e' || e.key === 'E') && e.preventDefault()}
+                                            placeholder="0"
                                             className="weight-input"
                                         />
                                         <span className="unit">g</span>

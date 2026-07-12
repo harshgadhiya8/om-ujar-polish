@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../utils/api';
 import './DailyLedger.css';
 
 const DailyLedger = () => {
@@ -16,6 +17,7 @@ const DailyLedger = () => {
         job_number: true,
         customer_id: true,
         customer_name: true,
+        ornament_type_name: true,
         aavak_vajan: true,
         javak_vajan: true,
         bag_vajan: true,
@@ -31,6 +33,7 @@ const DailyLedger = () => {
         { key: 'job_number', label: 'Job Number' },
         { key: 'customer_id', label: 'Customer ID' },
         { key: 'customer_name', label: 'Customer Name' },
+        { key: 'ornament_type_name', label: 'Ornament Type' },
         { key: 'aavak_vajan', label: 'Aavak Vajan (g)', isNumeric: true },
         { key: 'javak_vajan', label: 'Javak Vajan (g)', isNumeric: true },
         { key: 'bag_vajan', label: 'Bag Vajan (g)', isNumeric: true },
@@ -45,7 +48,7 @@ const DailyLedger = () => {
         setError(null);
 
         try {
-            const url = `http://localhost:3001/api/ledger?start_date=${start}&end_date=${end}`;
+            const url = `${API_BASE}/api/ledger?start_date=${start}&end_date=${end}`;
             const response = await fetch(url);
 
             if (!response.ok) {
@@ -119,7 +122,7 @@ const DailyLedger = () => {
 
         // Build URL
         const columnsParam = visibleCols.join(',');
-        const url = `http://localhost:3001/api/ledger?start_date=${startDate}&end_date=${endDate}&format=csv&columns=${columnsParam}`;
+        const url = `${API_BASE}/api/ledger?start_date=${startDate}&end_date=${endDate}&format=csv&columns=${columnsParam}`;
 
         // Trigger download
         window.location.href = url;
@@ -140,7 +143,7 @@ const DailyLedger = () => {
 
         // Build URL
         const columnsParam = visibleCols.join(',');
-        const url = `http://localhost:3001/api/ledger?start_date=${startDate}&end_date=${endDate}&format=pdf&columns=${columnsParam}`;
+        const url = `${API_BASE}/api/ledger?start_date=${startDate}&end_date=${endDate}&format=pdf&columns=${columnsParam}`;
 
         // Trigger download
         window.location.href = url;

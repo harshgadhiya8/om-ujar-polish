@@ -1,5 +1,5 @@
 // src/components/InitialBill.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './InitialBill.css';
 
@@ -30,8 +30,24 @@ const InitialBill = () => {
     const [reprinting, setReprinting] = useState(false);
     const [lastJobNumber, setLastJobNumber] = useState(null);
 
+    const todayIST = () => {
+        const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+        return ist.toISOString().split('T')[0];
+    };
+
+    const [receivedDate, setReceivedDate] = useState(todayIST);
+
+    // Ornament type selection
+    const [ornamentTypes, setOrnamentTypes] = useState([]);
+    const [ornamentSearch, setOrnamentSearch] = useState('');
+    const [showOrnamentDropdown, setShowOrnamentDropdown] = useState(false);
+    const [selectedOrnamentTypeId, setSelectedOrnamentTypeId] = useState(null);
+    const [isOtherSelected, setIsOtherSelected] = useState(false);
+    const [otherOrnamentName, setOtherOrnamentName] = useState('');
+    const ornamentDropdownRef = useRef(null);
+
     // Base URL for your backend API
-    const API_BASE = 'http://localhost:3001';
+    const { API_BASE } = require('../utils/api');
 
     // useEffect runs when component loads (similar to page load event)
     useEffect(() => {
@@ -41,15 +57,28 @@ const InitialBill = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (ornamentDropdownRef.current && !ornamentDropdownRef.current.contains(e.target)) {
+                setShowOrnamentDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
     // Load customers when component starts
     const loadInitialData = async () => {
         try {
             console.log('📊 Loading initial data...');
 
-            // Load customers
-            const customersResponse = await axios.get(`${API_BASE}/api/customers`);
+            const [customersResponse, ornamentResponse] = await Promise.all([
+                axios.get(`${API_BASE}/api/customers`),
+                axios.get(`${API_BASE}/api/ornament-types`)
+            ]);
             setCustomers(customersResponse.data);
-            console.log(`✅ Loaded ${customersResponse.data.length} customers`);
+            setOrnamentTypes(ornamentResponse.data);
+            console.log(`✅ Loaded ${customersResponse.data.length} customers, ${ornamentResponse.data.length} ornament types`);
 
         } catch (error) {
             console.error('❌ Error loading data:', error);
@@ -189,9 +218,18 @@ const InitialBill = () => {
             setPrintError(null);
             console.log('📝 Creating new job...');
 
+            let ornamentTypeId = selectedOrnamentTypeId;
+            if (isOtherSelected && otherOrnamentName.trim()) {
+                const ornResp = await axios.post(`${API_BASE}/api/ornament-types`, { name: otherOrnamentName.trim() });
+                ornamentTypeId = ornResp.data.id;
+                setOrnamentTypes(prev => prev.find(t => t.id === ornResp.data.id) ? prev : [...prev, ornResp.data]);
+            }
+
             const jobData = {
                 customer_id: selectedCustomer,
-                weight_captures: weightCaptures
+                weight_captures: weightCaptures,
+                ornament_type_id: ornamentTypeId || null,
+                received_date: receivedDate
             };
 
             const response = await axios.post(`${API_BASE}/api/jobs/initial`, jobData);
@@ -223,6 +261,11 @@ const InitialBill = () => {
     const resetForm = () => {
         setSelectedCustomer('');
         setWeightCaptures([]);
+        setSelectedOrnamentTypeId(null);
+        setOrnamentSearch('');
+        setIsOtherSelected(false);
+        setOtherOrnamentName('');
+        setReceivedDate(todayIST());
     };
 
     // Show message to user
@@ -291,6 +334,26 @@ const InitialBill = () => {
         return customer ? customer.name : '';
     };
 
+    const filteredOrnamentTypes = ornamentTypes.filter(t =>
+        t.name.toLowerCase().includes(ornamentSearch.toLowerCase())
+    );
+
+    const selectOrnamentType = (type) => {
+        setSelectedOrnamentTypeId(type.id);
+        setOrnamentSearch(type.name);
+        setIsOtherSelected(false);
+        setOtherOrnamentName('');
+        setShowOrnamentDropdown(false);
+    };
+
+    const selectOther = () => {
+        setSelectedOrnamentTypeId(null);
+        setOrnamentSearch('Other');
+        setIsOtherSelected(true);
+        setOtherOrnamentName('');
+        setShowOrnamentDropdown(false);
+    };
+
     return (
         <div className="initial-bill-container">
             <div className="header">
@@ -343,9 +406,11 @@ const InitialBill = () => {
                                         <div className="edit-weight">
                                             <input
                                                 type="number"
-                                                step="0.1"
+                                                step="1"
                                                 value={editWeight}
                                                 onChange={(e) => setEditWeight(e.target.value)}
+                                                min="0"
+                                                onKeyDown={(e) => (e.key === '.' || e.key === ',' || e.key === '-' || e.key === 'e' || e.key === 'E') && e.preventDefault()}
                                                 autoFocus
                                             />
                                             <button onClick={saveEditWeight} className="btn-save">✓</button>
@@ -353,7 +418,7 @@ const InitialBill = () => {
                                         </div>
                                     ) : (
                                         <div className="weight-item">
-                                            <span>{weight.toFixed(1)} g (floored: {Math.floor(weight)} g)</span>
+                                            <span>{Math.floor(weight)} g</span>
                                             <button onClick={() => startEditWeight(index)} className="btn-edit">✏️</button>
                                             <button onClick={() => removeWeight(index)} className="btn-remove">🗑️</button>
                                         </div>
@@ -468,6 +533,72 @@ const InitialBill = () => {
                 </div>
             )}
 
+            {/* Received Date */}
+            <div className="received-date-section">
+                <h3>📅 Date Received</h3>
+                <input
+                    type="date"
+                    value={receivedDate}
+                    max={todayIST()}
+                    onChange={e => setReceivedDate(e.target.value)}
+                    className="received-date-input"
+                />
+            </div>
+
+            {/* Ornament Type Section */}
+            <div className="ornament-section">
+                <h3>💍 Ornament Type</h3>
+                <div className="ornament-dropdown-container" ref={ornamentDropdownRef}>
+                    <input
+                        type="text"
+                        className="ornament-search-input"
+                        placeholder="Search or select ornament type..."
+                        value={ornamentSearch}
+                        onChange={(e) => {
+                            setOrnamentSearch(e.target.value);
+                            setSelectedOrnamentTypeId(null);
+                            setIsOtherSelected(false);
+                            setShowOrnamentDropdown(true);
+                        }}
+                        onFocus={() => setShowOrnamentDropdown(true)}
+                    />
+                    {showOrnamentDropdown && (
+                        <div className="ornament-dropdown-list">
+                            {filteredOrnamentTypes.map(type => (
+                                <div
+                                    key={type.id}
+                                    className="ornament-dropdown-item"
+                                    onMouseDown={() => selectOrnamentType(type)}
+                                >
+                                    {type.name}
+                                </div>
+                            ))}
+                            <div
+                                className="ornament-dropdown-item ornament-other"
+                                onMouseDown={selectOther}
+                            >
+                                + Other
+                            </div>
+                        </div>
+                    )}
+                </div>
+                {isOtherSelected && (
+                    <input
+                        type="text"
+                        className="ornament-other-input"
+                        placeholder="Enter new ornament type name..."
+                        value={otherOrnamentName}
+                        onChange={(e) => setOtherOrnamentName(e.target.value)}
+                        autoFocus
+                    />
+                )}
+                {selectedOrnamentTypeId && (
+                    <div className="selected-ornament">
+                        ✅ Selected: <strong>{ornamentSearch}</strong>
+                    </div>
+                )}
+            </div>
+
             {/* Job Creation Section */}
             {selectedCustomer && weightCaptures.length > 0 && (
                 <div className="job-summary">
@@ -478,6 +609,10 @@ const InitialBill = () => {
                             <span><strong>{selectedCustomer} - {getSelectedCustomerName()}</strong></span>
                         </div>
                         <div className="summary-line">
+                            <span>Date Received:</span>
+                            <span><strong>{receivedDate}</strong></span>
+                        </div>
+                        <div className="summary-line">
                             <span>Total Weight:</span>
                             <span><strong>{getTotalWeight()} g</strong></span>
                         </div>
@@ -485,6 +620,12 @@ const InitialBill = () => {
                             <span>Individual Captures:</span>
                             <span>{weightCaptures.length} weights</span>
                         </div>
+                        {(selectedOrnamentTypeId || (isOtherSelected && otherOrnamentName)) && (
+                            <div className="summary-line">
+                                <span>Ornament Type:</span>
+                                <span><strong>{isOtherSelected ? otherOrnamentName : ornamentSearch}</strong></span>
+                            </div>
+                        )}
                     </div>
 
                     <button

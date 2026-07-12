@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE } from '../utils/api';
 import './Archive.css';
 
 const Archive = () => {
@@ -29,7 +30,7 @@ const Archive = () => {
         setResult(null);
 
         try {
-            const url = `http://localhost:3001/api/archive/monthly?month=${selectedMonth}`;
+            const url = `${API_BASE}/api/archive/monthly?month=${selectedMonth}`;
             const response = await fetch(url);
 
             if (!response.ok) {
@@ -56,7 +57,7 @@ const Archive = () => {
         setResult(null);
 
         try {
-            const url = 'http://localhost:3001/api/archive/monthly';
+            const url = `${API_BASE}/api/archive/monthly`;
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../utils/api';
 import './CustomerLedger.css';
 
 const CustomerLedger = () => {
@@ -34,6 +35,7 @@ const CustomerLedger = () => {
         { key: 'delivered_at', label: 'Date' },
         { key: 'aavak_vajan', label: 'Aavak Vajan (g)', isNumeric: true },
         { key: 'javak_vajan', label: 'Javak Vajan (g)', isNumeric: true },
+        { key: 'ghat', label: 'Ghat (g)', isNumeric: true },
         { key: 'fine', label: 'Fine (g)', isNumeric: true }
     ];
 
@@ -43,6 +45,7 @@ const CustomerLedger = () => {
         { key: 'job_number', label: 'Job Number' },
         { key: 'customer_id', label: 'Customer ID' },
         { key: 'customer_name', label: 'Customer Name' },
+        { key: 'ornament_type_name', label: 'Ornament Type' },
         { key: 'aavak_vajan', label: 'Aavak Vajan (g)', isNumeric: true },
         { key: 'javak_vajan', label: 'Javak Vajan (g)', isNumeric: true },
         { key: 'bag_vajan', label: 'Bag Vajan (g)', isNumeric: true },
@@ -76,7 +79,7 @@ const CustomerLedger = () => {
         setError(null);
 
         try {
-            const url = 'http://localhost:3001/api/customer-ledger';
+            const url = `${API_BASE}/api/customer-ledger`;
             const response = await fetch(url);
 
             if (!response.ok) {
@@ -145,7 +148,7 @@ const CustomerLedger = () => {
         setValidationError(null);
 
         try {
-            const url = `http://localhost:3001/api/customer-ledger?customer_id=${customer_id}&month=${month}`;
+            const url = `${API_BASE}/api/customer-ledger?customer_id=${customer_id}&month=${month}`;
             const response = await fetch(url);
 
             if (!response.ok) {
@@ -245,7 +248,7 @@ const CustomerLedger = () => {
             return;
         }
 
-        const url = `http://localhost:3001/api/customer-ledger?customer_id=${ledgerData.customer_id}&month=${ledgerData.month}&format=csv&view=${viewMode}`;
+        const url = `${API_BASE}/api/customer-ledger?customer_id=${ledgerData.customer_id}&month=${ledgerData.month}&format=csv&view=${viewMode}`;
         window.location.href = url;
     };
 
@@ -255,7 +258,7 @@ const CustomerLedger = () => {
             return;
         }
 
-        const url = `http://localhost:3001/api/customer-ledger?customer_id=${ledgerData.customer_id}&month=${ledgerData.month}&format=pdf&view=${viewMode}`;
+        const url = `${API_BASE}/api/customer-ledger?customer_id=${ledgerData.customer_id}&month=${ledgerData.month}&format=pdf&view=${viewMode}`;
         window.location.href = url;
     };
 

@@ -1,5 +1,6 @@
 // server.js - Complete Backend for Silver Ornament Polishing System
 const express = require('express');
+const https = require('https');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const bwipjs = require('bwip-js');
@@ -9,6 +10,7 @@ const ExcelJS = require('exceljs');
 const fs = require('fs');
 const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
+const usb = require('usb');
 
 // Create Express application
 const app = express();
@@ -17,7 +19,8 @@ const port = 3001;
 // Middleware (these run before your routes)
 app.use(cors()); // Allow frontend to connect
 app.use(express.json()); // Parse JSON data from requests
-app.use(express.static('public')); // Serve static files (for barcode images)
+app.use(express.static(path.join(__dirname, 'public'))); // Serve static files (for barcode images)
+app.use(express.static(path.join(__dirname, '../frontend/build'))); // Serve React app
 
 // Database connection
 const dbPath = path.join(__dirname, '../om-ujar-palish');
@@ -39,7 +42,7 @@ let scaleStatus = 'disconnected';
 let reconnectTimer = null;
 
 function connectScale() {
-    const port = new SerialPort({ path: '/dev/cu.usbserial-140', baudRate: 9600 });
+    const port = new SerialPort({ path: '/dev/cu.usbserial-3140', baudRate: 9600 });
 
     port.on('error', (err) => {
         console.error('❌ Scale error:', err.message);
@@ -49,7 +52,7 @@ function connectScale() {
     const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
 
     port.on('open', () => {
-        console.log('⚖️  Scale connected on /dev/cu.usbserial-140');
+        console.log('⚖️  Scale connected on /dev/cu.usbserial-3140');
         scaleStatus = 'ready';
     });
 
@@ -81,9 +84,6 @@ let scalePort = connectScale();
 // ============================================================================
 
 async function printReceipt(jobData, type) {
-    if (!scalePort || !scalePort.isOpen) {
-        throw new Error('Scale/printer not connected');
-    }
 
     const ESC = 0x1b;
     const GS  = 0x1d;
@@ -94,56 +94,53 @@ async function printReceipt(jobData, type) {
     const txt = (str) => Buffer.from(str, 'utf8');
     const lf  = () => Buffer.from([LF]);
 
-    const INIT      = cmd(ESC, 0x40);
-    const BOLD_ON   = cmd(ESC, 0x45, 0x01);
-    const BOLD_OFF  = cmd(ESC, 0x45, 0x00);
-    const CENTER    = cmd(ESC, 0x61, 0x01);
-    const RIGHT     = cmd(ESC, 0x61, 0x02);
-    const LEFT      = cmd(ESC, 0x61, 0x00);
-    const CUT       = cmd(GS,  0x56, 0x42, 0x00);
-    const DASHES    = txt('-'.repeat(WIDTH));
+    const INIT        = cmd(ESC, 0x40);
+    const BOLD_ON     = cmd(ESC, 0x45, 0x01);
+    const BOLD_OFF    = cmd(ESC, 0x45, 0x00);
+    const LEFT        = cmd(ESC, 0x61, 0x00);
+    const CUT         = cmd(GS,  0x56, 0x42, 0x00);
+    const DASHES      = txt('-'.repeat(WIDTH));
+    const DBL_SIZE    = cmd(GS, 0x21, 0x11); // double width + double height
+    const DBL_HEIGHT  = cmd(GS, 0x21, 0x01); // double height only
+    const NORMAL_SIZE = cmd(GS, 0x21, 0x00);
 
     const now = new Date();
     const istDate = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
     const dateStr = istDate.toLocaleDateString('en-IN', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
     const timeStr = istDate.toLocaleTimeString('en-IN', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false });
 
-    function row(label, value) {
-        const line = label + value.padStart(WIDTH - label.length);
-        if (line.length > WIDTH) {
-            console.warn(`⚠️  Receipt row truncated: "${line}" (${line.length} > ${WIDTH} chars)`);
-        }
-        return line.slice(0, WIDTH);
-    }
-
     function barcode128(data) {
         const dataBytes = Buffer.from(data, 'utf8');
         return Buffer.concat([cmd(GS, 0x6b, 0x49, dataBytes.length), dataBytes]);
     }
 
-    const parts = [INIT];
+    const parts = [INIT, LEFT];
 
-    // Header
-    parts.push(CENTER, BOLD_ON, txt('Aum Polish'), BOLD_OFF, lf());
-    parts.push(RIGHT, txt(`${dateStr} ${timeStr}`), lf());
-    parts.push(LEFT, DASHES, lf());
+    // Header (left-aligned)
+    parts.push(DBL_SIZE, BOLD_ON, txt('Aum Ujjar Polish'), BOLD_OFF, NORMAL_SIZE, lf());
+    parts.push(lf());
+    parts.push(txt(`${dateStr}  ${timeStr}`), lf());
+    parts.push(DASHES, lf());
 
     if (type === 'initial') {
-        parts.push(txt(row('Job:', jobData.job_number)), lf());
-        parts.push(txt(row('Customer:', `${jobData.customer_name} (${jobData.customer_id})`)), lf());
-        parts.push(txt(row('Aavak Vajan:', `${Math.floor(jobData.initial_weight)}g`)), lf());
+        parts.push(txt(`Job: ${jobData.job_number}`), lf());
+        parts.push(DBL_HEIGHT, BOLD_ON, txt(`Client: ${jobData.customer_name} (${jobData.customer_id})`), BOLD_OFF, NORMAL_SIZE, lf());
+        if (jobData.ornament_type_name) parts.push(txt(`Ornament: ${jobData.ornament_type_name}`), lf());
+        parts.push(DBL_HEIGHT, txt(`Aavak Vajan: ${Math.floor(jobData.initial_weight)}g`), NORMAL_SIZE, lf());
         parts.push(DASHES, lf());
-        parts.push(CENTER, barcode128(jobData.job_number), lf(), lf());
+        parts.push(barcode128(jobData.job_number), lf());
     } else {
-        parts.push(txt(row('Customer:', `${jobData.customer_name} (${jobData.customer_id})`)), lf());
-        parts.push(txt(row('Javak Vajan:', `${Math.floor(jobData.final_weight)}g`)), lf());
-        parts.push(txt(row('Aavak Vajan:', `${Math.floor(jobData.initial_weight)}g`)), lf());
-        parts.push(txt(row('Bag Vajan:', `${Math.floor(jobData.plastic_bag_weight)}g`)), lf());
-        parts.push(txt(row('Ghat:', `${Math.floor(jobData.ghat)}g`)), lf());
-        parts.push(txt(row('Fine:', `${Math.floor(jobData.fine_amount)}g`)), lf());
-        parts.push(txt(row('Cust. Bag:', `${Math.floor(jobData.customer_bag_weight || 0)}g`)), lf());
+        parts.push(txt(`Job: ${jobData.job_number}`), lf());
+        parts.push(DBL_HEIGHT, BOLD_ON, txt(`Client: ${jobData.customer_name} (${jobData.customer_id})`), BOLD_OFF, NORMAL_SIZE, lf());
+        if (jobData.ornament_type_name) parts.push(txt(`Ornament: ${jobData.ornament_type_name}`), lf());
+        parts.push(txt(`Javak Vajan: ${Math.floor(jobData.final_weight)}g`), lf());
+        parts.push(txt(`Aavak Vajan: ${Math.floor(jobData.initial_weight)}g`), lf());
+        parts.push(txt(`Bag Vajan: ${Math.floor(jobData.plastic_bag_weight)}g`), lf());
+        parts.push(txt(`Ghat: ${Math.floor(jobData.ghat)}g`), lf());
+        parts.push(txt(`Fine: ${Math.floor(jobData.fine_amount)}g`), lf());
         parts.push(DASHES, lf());
-        parts.push(CENTER, barcode128(jobData.job_number), lf(), lf());
+        parts.push(barcode128(jobData.job_number), lf());
+        parts.push(txt(`Cust. Bag: ${Math.floor(jobData.customer_bag_weight || 0)}g`), lf());
     }
 
     parts.push(CUT);
@@ -151,12 +148,29 @@ async function printReceipt(jobData, type) {
     const data = Buffer.concat(parts);
 
     return new Promise((resolve, reject) => {
-        scalePort.write(data, (err) => {
-            if (err) return reject(err);
-            scalePort.drain((err) => {
-                if (err) return reject(err);
-                resolve();
-            });
+        const device = usb.findByIds(0x0483, 0x5743);
+        if (!device) return reject(new Error('Printer not found — is it plugged in?'));
+        try {
+            device.open();
+        } catch (e) {
+            return reject(new Error('Cannot open printer USB device: ' + e.message));
+        }
+        const iface = device.interface(0);
+        try {
+            iface.claim();
+        } catch (e) {
+            device.close();
+            return reject(new Error('Cannot claim printer interface: ' + e.message));
+        }
+        const endpoint = iface.endpoints.find(ep => ep.direction === 'out');
+        if (!endpoint) {
+            iface.release(() => device.close());
+            return reject(new Error('No OUT endpoint on printer'));
+        }
+        endpoint.transfer(data, (err) => {
+            iface.release(() => device.close());
+            if (err) reject(err);
+            else resolve();
         });
     });
 }
@@ -253,6 +267,35 @@ function runMigrations() {
                     if (hasWeightCaptures && hasJavakCaptures) {
                         console.log('✅ Database schema up to date');
                     }
+                }
+            });
+
+            // Migration 5: Create ornament_types table
+            db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='ornament_types'", (err, row) => {
+                if (err) { console.error('❌ Error checking for ornament_types table:', err); return; }
+                if (!row) {
+                    console.log('➕ Migration 5: Creating ornament_types table and seeding...');
+                    db.run(`
+                        CREATE TABLE ornament_types (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT UNIQUE NOT NULL,
+                            is_active INTEGER DEFAULT 1,
+                            created_at TEXT DEFAULT (datetime('now', '+5:30'))
+                        )
+                    `, (err) => {
+                        if (err) { console.error('❌ Migration 5 failed:', err); return; }
+                        console.log('✅ Migration 5: ornament_types table created');
+                        const types = [
+                            'Payal', 'Vichhiya', 'Mangal Sutra', 'Kandola', 'Pendal',
+                            'Chain', 'Kadli', 'Ferva', 'Aankda', 'Bracelet', 'Panja',
+                            'Chain-Vichhiya', 'Kada', 'Viti', 'Mix', 'Bajubandh', 'Lakki',
+                            'Chhala', 'D', 'Dabba', 'Bangdi', 'Belt', 'Rakhdi', 'Chotla',
+                            'Ghughri', 'Para', 'angutha'
+                        ];
+                        const stmt = db.prepare('INSERT OR IGNORE INTO ornament_types (name) VALUES (?)');
+                        types.forEach(n => stmt.run(n));
+                        stmt.finalize(() => console.log(`✅ Seeded ${types.length} ornament types`));
+                    });
                 }
             });
         });
@@ -497,6 +540,7 @@ async function generateReceipt(jobData) {
             const rows = [
                 { label: 'Job Number', value: jobData.job_number },
                 { label: 'Name', value: `${jobData.customer_name} (${jobData.customer_id})` },
+                ...(jobData.ornament_type_name ? [{ label: 'Ornament', value: jobData.ornament_type_name }] : []),
                 { label: 'Aavak Vajan', value: `${Math.floor(jobData.initial_weight)} g` }
             ];
 
@@ -606,6 +650,16 @@ async function generateCompletionReceipt(jobData) {
             doc.text(`${jobData.customer_name} (${jobData.customer_id})`, 10, currentY, { width: 207, align: 'right' });
             doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
 
+            // Ornament Type
+            if (jobData.ornament_type_name) {
+                currentY += 18;
+                doc.fontSize(8).font('Helvetica-Bold');
+                doc.text('Ornament:', 10, currentY);
+                doc.font('Helvetica');
+                doc.text(jobData.ornament_type_name, 10, currentY, { width: 207, align: 'right' });
+                doc.moveTo(10, currentY + 12).lineTo(217, currentY + 12).stroke();
+            }
+
             // Javak Vajan
             currentY += 18;
             doc.fontSize(8).font('Helvetica-Bold');
@@ -686,6 +740,16 @@ app.get('/', (req, res) => {
         message: '🏭 Silver Ornament Polishing API Server',
         status: 'running',
         timestamp: getCurrentTimestamp(),
+        database: 'connected'
+    });
+});
+
+// Device status endpoint
+app.get('/api/status', (req, res) => {
+    const printerConnected = !!usb.findByIds(0x0483, 0x5743);
+    res.json({
+        scale: scaleStatus,
+        printer: printerConnected ? 'connected' : 'disconnected',
         database: 'connected'
     });
 });
@@ -806,13 +870,40 @@ app.get('/api/ornament-types', (req, res) => {
     });
 });
 
+// Add a new ornament type
+app.post('/api/ornament-types', (req, res) => {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Name is required' });
+    }
+    const trimmedName = name.trim();
+    db.get('SELECT * FROM ornament_types WHERE LOWER(name) = LOWER(?)', [trimmedName], (err, existing) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (existing) return res.json(existing);
+        db.run('INSERT INTO ornament_types (name) VALUES (?)', [trimmedName], function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            db.get('SELECT * FROM ornament_types WHERE id = ?', [this.lastID], (err, row) => {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json(row);
+            });
+        });
+    });
+});
+
 // Create initial job/bill
 app.post('/api/jobs/initial', async (req, res) => {
     try {
         const {
             customer_id,
-            weight_captures
+            weight_captures,
+            ornament_type_id,
+            received_date
         } = req.body;
+
+        // Use provided date or fall back to current IST time
+        const createdAt = received_date
+            ? `${received_date} 00:00:00`
+            : new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
 
         console.log(`📝 Creating initial bill for customer: ${customer_id}`);
         console.log(`   Weight captures:`, weight_captures);
@@ -839,12 +930,11 @@ app.post('/api/jobs/initial', async (req, res) => {
         // Generate barcode
         const barcodeBase64 = await generateBarcode(jobNumber);
 
-        // Insert job into database (let DB handle timestamps with IST)
         db.run(
             `INSERT INTO jobs
-            (job_number, customer_id, initial_weight, weight_captures, barcode)
-            VALUES (?, ?, ?, ?, ?)`,
-            [jobNumber, customer_id, totalWeight, JSON.stringify(weight_captures), barcodeBase64],
+            (job_number, customer_id, ornament_type_id, initial_weight, weight_captures, barcode, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [jobNumber, customer_id, ornament_type_id || null, totalWeight, JSON.stringify(weight_captures), barcodeBase64, createdAt, createdAt],
             function(err) {
                 if (err) {
                     console.error('❌ Error creating job:', err);
@@ -855,9 +945,11 @@ app.post('/api/jobs/initial', async (req, res) => {
 
                     // Get complete job details with customer info
                     db.get(
-                        `SELECT j.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address
+                        `SELECT j.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address,
+                                ot.name as ornament_type_name
                          FROM jobs j
                          JOIN customers c ON j.customer_id = c.customer_id
+                         LEFT JOIN ornament_types ot ON j.ornament_type_id = ot.id
                          WHERE j.id = ?`,
                         [this.lastID],
                         (err, row) => {
@@ -931,9 +1023,10 @@ app.get('/api/jobs/:jobNumber/receipt', async (req, res) => {
 
     db.get(
         `SELECT j.*, c.name as customer_name, c.phone as customer_phone,
-                c.address as customer_address
+                c.address as customer_address, ot.name as ornament_type_name
          FROM jobs j
          JOIN customers c ON j.customer_id = c.customer_id
+         LEFT JOIN ornament_types ot ON j.ornament_type_id = ot.id
          WHERE j.job_number = ?`,
         [jobNumber],
         async (err, row) => {
@@ -971,9 +1064,10 @@ app.get('/api/jobs/:jobNumber/completion-receipt', async (req, res) => {
 
     db.get(
         `SELECT j.*, c.name as customer_name, c.phone as customer_phone,
-                c.address as customer_address
+                c.address as customer_address, ot.name as ornament_type_name
          FROM jobs j
          JOIN customers c ON j.customer_id = c.customer_id
+         LEFT JOIN ornament_types ot ON j.ornament_type_id = ot.id
          WHERE j.job_number = ?`,
         [jobNumber],
         async (err, row) => {
@@ -1146,15 +1240,17 @@ app.put('/api/jobs/:jobNumber/complete', (req, res) => {
                         return res.status(500).json({ error: 'Failed to complete job' });
                     }
 
-                    // Fetch updated job with all data (no JOIN with ornament_types)
+                    // Fetch updated job with all data
                     db.get(
                         `SELECT
                             j.*,
                             c.name as customer_name,
                             c.phone as customer_phone,
-                            c.address as customer_address
+                            c.address as customer_address,
+                            ot.name as ornament_type_name
                         FROM jobs j
                         JOIN customers c ON j.customer_id = c.customer_id
+                        LEFT JOIN ornament_types ot ON j.ornament_type_id = ot.id
                         WHERE j.job_number = ?`,
                         [jobNumber],
                         (err, updatedJob) => {
@@ -1203,9 +1299,11 @@ app.post('/api/jobs/:jobNumber/reprint', (req, res) => {
     console.log(`🖨️  Reprint requested for job: ${jobNumber}`);
 
     db.get(
-        `SELECT j.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address
+        `SELECT j.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address,
+                ot.name as ornament_type_name
          FROM jobs j
          JOIN customers c ON j.customer_id = c.customer_id
+         LEFT JOIN ornament_types ot ON j.ornament_type_id = ot.id
          WHERE j.job_number = ?`,
         [jobNumber],
         async (err, job) => {
@@ -1227,10 +1325,9 @@ app.post('/api/jobs/:jobNumber/reprint', (req, res) => {
 
 // Weight endpoint - TEMPORARY mock until weighing machine cable is reconnected
 app.get('/api/weight', (req, res) => {
-    const mockWeight = parseFloat((Math.random() * 4900 + 100).toFixed(1));
     res.json({
-        weight: mockWeight,
-        status: 'ready',
+        weight: currentWeight,
+        status: scaleStatus,
         timestamp: getCurrentTimestamp()
     });
 });
@@ -1600,7 +1697,7 @@ app.get('/api/ledger', (req, res) => {
 
     // Parse columns parameter (comma-separated)
     const validColumns = [
-        'job_number', 'customer_id', 'customer_name',
+        'job_number', 'customer_id', 'customer_name', 'ornament_type_name',
         'aavak_vajan', 'javak_vajan', 'bag_vajan',
         'customer_bag_weight', 'ghat', 'fine'
     ];
@@ -1620,6 +1717,7 @@ app.get('/api/ledger', (req, res) => {
             j.job_number,
             j.customer_id,
             c.name as customer_name,
+            ot.name as ornament_type_name,
             j.initial_weight as aavak_vajan,
             j.final_weight as javak_vajan,
             j.plastic_bag_weight as bag_vajan,
@@ -1629,6 +1727,7 @@ app.get('/api/ledger', (req, res) => {
             j.delivered_at
         FROM jobs j
         JOIN customers c ON j.customer_id = c.customer_id
+        LEFT JOIN ornament_types ot ON j.ornament_type_id = ot.id
         WHERE j.status = 'completed'
           AND DATE(j.delivered_at) >= DATE(?)
           AND DATE(j.delivered_at) <= DATE(?)
@@ -1771,6 +1870,7 @@ app.get('/api/customer-ledger', (req, res) => {
                 j.delivered_at,
                 j.customer_id,
                 c.name as customer_name,
+                ot.name as ornament_type_name,
                 j.initial_weight as aavak_vajan,
                 j.final_weight as javak_vajan,
                 j.plastic_bag_weight as bag_vajan,
@@ -1779,10 +1879,11 @@ app.get('/api/customer-ledger', (req, res) => {
                 j.fine_amount as fine
             FROM jobs j
             JOIN customers c ON j.customer_id = c.customer_id
+            LEFT JOIN ornament_types ot ON j.ornament_type_id = ot.id
             WHERE j.customer_id = ?
               AND j.status = 'completed'
-              AND strftime('%Y-%m', j.delivered_at) = ?
-            ORDER BY j.delivered_at DESC
+              AND strftime('%Y-%m', j.created_at) = ?
+            ORDER BY j.created_at DESC
         `;
 
         db.all(query, [customer_id, month], (err, jobs) => {
@@ -2397,6 +2498,7 @@ async function generateCustomerExcel(month, customerId, archiveDir) {
             SELECT
                 j.job_number,
                 j.delivered_at,
+                ot.name as ornament_type,
                 j.initial_weight as aavak_vajan,
                 j.final_weight as javak_vajan,
                 j.plastic_bag_weight as bag_vajan,
@@ -2407,6 +2509,7 @@ async function generateCustomerExcel(month, customerId, archiveDir) {
                 j.total_amount,
                 j.status
             FROM jobs j
+            LEFT JOIN ornament_types ot ON j.ornament_type_id = ot.id
             WHERE j.customer_id = ?
               AND j.status = 'completed'
               AND strftime('%Y-%m', j.delivered_at) = ?
@@ -2459,6 +2562,7 @@ async function generateCustomerExcel(month, customerId, archiveDir) {
                     jobsSheet.columns = [
                         { header: 'Job Number', key: 'job_number', width: 18 },
                         { header: 'Date', key: 'date', width: 12 },
+                        { header: 'Ornament Type', key: 'ornament_type', width: 16 },
                         { header: 'Aavak Vajan (g)', key: 'aavak_vajan', width: 15 },
                         { header: 'Javak Vajan (g)', key: 'javak_vajan', width: 15 },
                         { header: 'Bag Vajan (g)', key: 'bag_vajan', width: 14 },
@@ -2473,6 +2577,7 @@ async function generateCustomerExcel(month, customerId, archiveDir) {
                         jobsSheet.addRow({
                             job_number: job.job_number,
                             date: job.delivered_at ? new Date(job.delivered_at).toLocaleDateString('en-IN') : '',
+                            ornament_type: job.ornament_type || '',
                             aavak_vajan: Math.floor(job.aavak_vajan || 0),
                             javak_vajan: Math.floor(job.javak_vajan || 0),
                             bag_vajan: Math.floor(job.bag_vajan || 0),
@@ -2562,23 +2667,61 @@ function formatMonthDisplay(monthStr) {
 // SERVER STARTUP
 // ============================================================================
 
-// Start the server
-app.listen(port, () => {
+// ============================================================================
+// PHONE SCAN → LAPTOP (SSE)
+// ============================================================================
+
+let scanListener = null;
+
+// Laptop connects here and listens for scans
+app.get('/api/scan/listen', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    scanListener = res;
+    console.log('📡 Scan listener connected');
+
+    req.on('close', () => {
+        if (scanListener === res) scanListener = null;
+        console.log('📡 Scan listener disconnected');
+    });
+});
+
+// Phone posts scanned job number here
+app.post('/api/scan/push', (req, res) => {
+    const { job_number } = req.body;
+    if (!job_number) return res.status(400).json({ success: false, error: 'job_number required' });
+
+    console.log(`📱 Scan received: ${job_number}`);
+
+    if (scanListener) {
+        scanListener.write(`data: ${JSON.stringify({ job_number })}\n\n`);
+        res.json({ success: true });
+    } else {
+        res.json({ success: false, error: 'No laptop listener connected' });
+    }
+});
+
+// Catch-all: serve React app for any non-API route
+app.get(/(.*)/, (_req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+});
+
+// Load TLS cert and start HTTPS server
+const tlsOptions = {
+    key: fs.readFileSync(path.join(__dirname, 'certs/local-key.pem')),
+    cert: fs.readFileSync(path.join(__dirname, 'certs/local.pem'))
+};
+
+https.createServer(tlsOptions, app).listen(port, '0.0.0.0', () => {
     console.log('🚀 ===============================================');
-    console.log('🏭 Silver Ornament Polishing API Server');
+    console.log('🏭 Silver Ornament Polishing API Server (HTTPS)');
     console.log('🚀 ===============================================');
-    console.log(`🌐 Server running on: http://localhost:${port}`);
+    console.log(`🌐 Laptop:  https://localhost:${port}`);
+    console.log(`📱 Phone:   https://192.168.1.171:${port}`);
     console.log(`📊 Database: SQLite (${dbPath})`);
-    console.log(`📋 API Documentation:`);
-    console.log(`   GET  /                           - Server status`);
-    console.log(`   GET  /api/customers              - List all customers`);
-    console.log(`   POST /api/customers              - Add new customer`);
-    console.log(`   GET  /api/ornament-types         - List ornament types`);
-    console.log(`   POST /api/jobs/initial           - Create initial bill`);
-    console.log(`   GET  /api/jobs                   - List all jobs`);
-    console.log(`   GET  /api/jobs/:jobNumber        - Get job details`);
-    console.log(`   PUT  /api/jobs/:jobNumber/complete - Complete job with final weights`);
-    console.log(`   GET  /api/weight                 - Get current weight from scale`);
     console.log('🚀 ===============================================');
     console.log('✅ Ready to serve silver polishing requests!');
 });

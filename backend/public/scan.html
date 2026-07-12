@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Scan Receipt</title>
+  <script src="/zxing-browser.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0f0f0f;
+      color: #fff;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+      padding: 1rem;
+    }
+    h1 { font-size: 1.3rem; font-weight: 600; letter-spacing: -0.02em; }
+    #video {
+      width: 100%;
+      max-width: 380px;
+      border-radius: 14px;
+      border: 3px solid #007bff;
+      display: none;
+    }
+    #btn {
+      padding: 1rem 2.5rem;
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 1.15rem;
+      font-weight: 600;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #btn:active { opacity: 0.8; }
+    #status {
+      font-size: 1.3rem;
+      min-height: 2rem;
+      text-align: center;
+      font-weight: 500;
+    }
+    .success { color: #34c759; }
+    .error   { color: #ff3b30; }
+    .muted   { color: #888; font-size: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>🔍 Scan Receipt Barcode</h1>
+  <video id="video" autoplay playsinline muted></video>
+  <button id="btn" onclick="startScan()">📷 Start Camera</button>
+  <div id="status" class="muted">Tap to scan a barcode</div>
+
+  <script>
+    const reader = new ZXingBrowser.BrowserMultiFormatReader();
+    let controls = null;
+    let scanning = false;
+
+    async function startScan() {
+      if (scanning) return;
+      scanning = true;
+      document.getElementById('btn').style.display = 'none';
+      document.getElementById('video').style.display = 'block';
+      setStatus('Point camera at barcode...', 'muted');
+
+      try {
+        controls = await reader.decodeFromConstraints(
+          { video: { facingMode: 'environment', width: { ideal: 1280 } } },
+          document.getElementById('video'),
+          (result, err) => {
+            if (result && scanning) onScan(result.getText());
+          }
+        );
+      } catch (e) {
+        setStatus('Camera error: ' + e.message, 'error');
+        reset();
+      }
+    }
+
+    async function onScan(jobNumber) {
+      scanning = false;
+      if (controls) { controls.stop(); controls = null; }
+      document.getElementById('video').style.display = 'none';
+      setStatus('Sending...', 'muted');
+
+      try {
+        const res = await fetch('/api/scan/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_number: jobNumber })
+        });
+        const data = await res.json();
+        if (data.success) {
+          setStatus('✅ ' + jobNumber + ' sent!', 'success');
+        } else {
+          setStatus('⚠️ Laptop not connected\n' + jobNumber, 'error');
+        }
+      } catch (e) {
+        setStatus('❌ Network error', 'error');
+      }
+
+      setTimeout(reset, 2500);
+    }
+
+    function reset() {
+      scanning = false;
+      setStatus('Tap to scan again', 'muted');
+      document.getElementById('btn').style.display = 'block';
+      document.getElementById('video').style.display = 'none';
+    }
+
+    function setStatus(msg, cls) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = cls;
+    }
+  </script>
+</body>
+</html>

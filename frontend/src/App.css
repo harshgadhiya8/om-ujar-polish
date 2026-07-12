@@ -63,6 +63,51 @@ button {
   font-weight: 600;
 }
 
+.device-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  background: #f0fdf4;
+  border-bottom: 1px solid #bbf7d0;
+}
+
+.device-status-bar.has-warning {
+  background: #fff7ed;
+  border-bottom-color: #fed7aa;
+}
+
+.device-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.device-pill.ok {
+  color: #15803d;
+}
+
+.device-pill.warn {
+  color: #c2410c;
+}
+
+.device-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.device-pill.ok .device-dot {
+  background: #22c55e;
+}
+
+.device-pill.warn .device-dot {
+  background: #f97316;
+}
+
 .tab-navigation {
   display: flex;
   background: #f8f9fa;
