@@ -14,7 +14,11 @@ Open **Terminal** (Cmd + Space → type Terminal → Enter) and run:
 xcode-select --install
 ```
 
-A dialog will appear — click **Install**. Wait for it to finish (5–10 minutes).
+After running this, look for a **popup dialog** on screen and click **Install**. Wait for it to finish (5–10 minutes).
+
+> **Note:** Terminal will show `xcode-select: note: install requested for command line developer tools` — this is normal and means it worked. The popup should appear within a few seconds.
+>
+> If no popup appears, run `sudo xcode-select --reset` and try again.
 
 ### Step 2 — Download the code from GitHub
 
