@@ -4,6 +4,14 @@ set -e
 # Resolve the project root directory regardless of where the script is called from
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Always load brew into PATH first (Apple Silicon: /opt/homebrew, Intel: /usr/local)
+# This is needed whether brew was just installed or already existed
+if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -f /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 echo ""
 echo "======================================"
 echo "  Om Ujar Polish System - Setup"
@@ -15,7 +23,7 @@ if ! command -v brew &>/dev/null; then
     echo "Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-    # Load brew into current session (Apple Silicon installs to /opt/homebrew)
+    # Load brew into current session after fresh install
     if [ -f /opt/homebrew/bin/brew ]; then
         eval "$(/opt/homebrew/bin/brew shellenv)"
     elif [ -f /usr/local/bin/brew ]; then
