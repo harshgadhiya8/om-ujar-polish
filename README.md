@@ -62,6 +62,7 @@ Double-click **Polish System.app** in the project folder.
 When the developer pushes new changes, pull them and rebuild:
 
 ```bash
+eval "$(/opt/homebrew/bin/brew shellenv)"
 cd ~/Desktop/om-ujar-polish
 git pull
 cd frontend && npm install && npm run build && cd ..
@@ -69,6 +70,11 @@ cd backend && npm install && cd ..
 ```
 
 Then restart **Polish System.app**.
+
+> If you see `npm: command not found` or `node: no such file or directory`, the first `eval` line fixes it. You can also run it once to fix permanently:
+> ```bash
+> echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+> ```
 
 ---
 
