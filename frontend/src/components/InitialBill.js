@@ -213,6 +213,11 @@ const InitialBill = () => {
             return;
         }
 
+        if (!selectedOrnamentTypeId && !(isOtherSelected && otherOrnamentName.trim())) {
+            showMessage('Please select an ornament type', 'error');
+            return;
+        }
+
         try {
             setLoading(true);
             setPrintError(null);
