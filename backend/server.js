@@ -209,6 +209,52 @@ function runMigrations() {
     console.log('🔧 Running database migrations...');
 
     db.serialize(() => {
+        // Clean up orphaned tables from previous failed migration runs
+        db.run(`DROP TABLE IF EXISTS jobs_new`);
+
+        // Fresh install: create all tables with current full schema.
+        // IF NOT EXISTS makes these no-ops on existing databases.
+        db.run(`CREATE TABLE IF NOT EXISTS customers (
+            customer_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            phone TEXT,
+            address TEXT,
+            created_at TEXT DEFAULT (datetime('now', '+5:30')),
+            updated_at TEXT DEFAULT (datetime('now', '+5:30'))
+        )`);
+
+        db.run(`CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_number TEXT UNIQUE NOT NULL,
+            customer_id TEXT NOT NULL,
+            ornament_type_id INTEGER,
+            initial_weight REAL NOT NULL,
+            weight_captures TEXT,
+            ghughri_option INTEGER DEFAULT 0,
+            service_rate_per_kg REAL,
+            service_charge REAL,
+            status TEXT DEFAULT 'received',
+            barcode TEXT UNIQUE NOT NULL,
+            created_at TEXT DEFAULT (datetime('now', '+5:30')),
+            updated_at TEXT DEFAULT (datetime('now', '+5:30')),
+            final_weight REAL,
+            plastic_bag_weight REAL DEFAULT 0,
+            fine_amount REAL DEFAULT 0,
+            fine_based_charge REAL,
+            total_amount REAL,
+            delivered_at TEXT,
+            javak_vajan_captures TEXT,
+            customer_bag_weight REAL DEFAULT 0,
+            ghat REAL DEFAULT 0
+        )`);
+
+        db.run(`CREATE TABLE IF NOT EXISTS customer_monthly_sequences (
+            customer_id TEXT NOT NULL,
+            month TEXT NOT NULL,
+            last_sequence INTEGER DEFAULT 0,
+            PRIMARY KEY (customer_id, month)
+        )`);
+
         // Check current schema
         db.all("PRAGMA table_info(jobs)", (err, columns) => {
             if (err) {
