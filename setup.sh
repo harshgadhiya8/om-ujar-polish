@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Resolve the project root directory regardless of where the script is called from
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo ""
 echo "======================================"
 echo "  Om Ujar Polish System - Setup"
@@ -46,7 +49,7 @@ mkcert -install
 # ── 4. Generate certificate for this Mac ───────────────────────
 HOSTNAME=$(scutil --get LocalHostName)
 LOCAL_HOST="${HOSTNAME}.local"
-CERT_DIR="$(dirname "$0")/backend/certs"
+CERT_DIR="$ROOT_DIR/backend/certs"
 mkdir -p "$CERT_DIR"
 
 echo ""
@@ -62,12 +65,12 @@ echo "✅ Certificate saved to backend/certs/"
 # ── 5. npm install ─────────────────────────────────────────────
 echo ""
 echo "Installing backend dependencies..."
-cd "$(dirname "$0")/backend"
+cd "$ROOT_DIR/backend"
 npm install
 
 echo ""
 echo "Installing frontend dependencies and building..."
-cd "$(dirname "$0")/frontend"
+cd "$ROOT_DIR/frontend"
 npm install
 npm run build
 
