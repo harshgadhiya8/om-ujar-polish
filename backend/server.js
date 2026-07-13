@@ -1401,6 +1401,7 @@ function generateLedgerCSV(startDate, endDate, jobs, totals, columns, res) {
             job_number: { header: 'Job Number', key: 'job_number' },
             customer_id: { header: 'Customer ID', key: 'customer_id' },
             customer_name: { header: 'Customer Name', key: 'customer_name' },
+            ornament_type_name: { header: 'Ornament Type', key: 'ornament_type_name' },
             aavak_vajan: { header: 'Aavak Vajan (g)', key: 'aavak_vajan' },
             javak_vajan: { header: 'Javak Vajan (g)', key: 'javak_vajan' },
             bag_vajan: { header: 'Bag Vajan (g)', key: 'bag_vajan' },
@@ -1541,7 +1542,8 @@ async function generateLedgerPDF(startDate, endDate, jobs, totals, columns, res)
         const columnDefs = {
             job_number: { header: 'Job Number', width: 70 },
             customer_id: { header: 'Cust ID', width: 50 },
-            customer_name: { header: 'Name', width: 90 },
+            customer_name: { header: 'Name', width: 80 },
+            ornament_type_name: { header: 'Ornament', width: 70 },
             aavak_vajan: { header: 'Aavak (g)', width: 60 },
             javak_vajan: { header: 'Javak (g)', width: 60 },
             bag_vajan: { header: 'Bag (g)', width: 55 },
