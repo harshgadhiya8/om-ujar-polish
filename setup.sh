@@ -1,16 +1,7 @@
 #!/bin/bash
 set -e
 
-# Resolve the project root directory regardless of where the script is called from
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Always load brew into PATH first (Apple Silicon: /opt/homebrew, Intel: /usr/local)
-# This is needed whether brew was just installed or already existed
-if [ -f /opt/homebrew/bin/brew ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [ -f /usr/local/bin/brew ]; then
-    eval "$(/usr/local/bin/brew shellenv)"
-fi
 
 echo ""
 echo "======================================"
@@ -19,42 +10,57 @@ echo "======================================"
 echo ""
 
 # ── 1. Homebrew ────────────────────────────────────────────────
-if ! command -v brew &>/dev/null; then
+# Determine brew binary location (Apple Silicon: /opt/homebrew, Intel: /usr/local)
+if [ -f /opt/homebrew/bin/brew ]; then
+    BREW=/opt/homebrew/bin/brew
+    BREW_BIN=/opt/homebrew/bin
+elif [ -f /usr/local/bin/brew ]; then
+    BREW=/usr/local/bin/brew
+    BREW_BIN=/usr/local/bin
+else
     echo "Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-    # Load brew into current session after fresh install
+    # Set path after fresh install
     if [ -f /opt/homebrew/bin/brew ]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    elif [ -f /usr/local/bin/brew ]; then
-        eval "$(/usr/local/bin/brew shellenv)"
+        BREW=/opt/homebrew/bin/brew
+        BREW_BIN=/opt/homebrew/bin
+    else
+        BREW=/usr/local/bin/brew
+        BREW_BIN=/usr/local/bin
     fi
-else
-    echo "✅ Homebrew already installed"
 fi
 
+eval "$($BREW shellenv)"
+echo "✅ Homebrew ready ($BREW)"
+
 # ── 2. Node.js ─────────────────────────────────────────────────
-if ! command -v node &>/dev/null; then
+if [ ! -f "$BREW_BIN/node" ] && ! command -v node &>/dev/null; then
     echo "Installing Node.js..."
-    brew install node
+    $BREW install node
 else
-    echo "✅ Node.js $(node -v) already installed"
+    echo "✅ Node.js $(node -v 2>/dev/null || echo 'found') already installed"
 fi
 
 # ── 3. mkcert ──────────────────────────────────────────────────
-if ! command -v mkcert &>/dev/null; then
+if [ ! -f "$BREW_BIN/mkcert" ]; then
     echo "Installing mkcert..."
-    brew install mkcert
-else
-    echo "✅ mkcert already installed"
+    $BREW install mkcert
 fi
 
-# Install mkcert root CA into Mac's trust store
-echo ""
-echo "Installing certificate authority (you may be asked for your Mac password)..."
-mkcert -install
+# Use absolute path to mkcert — avoids PATH issues entirely
+MKCERT="$BREW_BIN/mkcert"
+if [ ! -f "$MKCERT" ]; then
+    echo "❌ mkcert not found at $MKCERT after install."
+    echo "   Try running manually: $BREW install mkcert"
+    exit 1
+fi
+echo "✅ mkcert ready ($MKCERT)"
 
-# ── 4. Generate certificate for this Mac ───────────────────────
+# ── 4. Install root CA and generate certificate ────────────────
+echo ""
+echo "Installing certificate authority (your Mac password may be asked)..."
+$MKCERT -install
+
 HOSTNAME=$(scutil --get LocalHostName)
 LOCAL_HOST="${HOSTNAME}.local"
 CERT_DIR="$ROOT_DIR/backend/certs"
@@ -62,12 +68,10 @@ mkdir -p "$CERT_DIR"
 
 echo ""
 echo "Generating HTTPS certificate for: $LOCAL_HOST"
-mkcert -key-file "$CERT_DIR/local-key.pem" -cert-file "$CERT_DIR/local.pem" \
+$MKCERT -key-file "$CERT_DIR/local-key.pem" -cert-file "$CERT_DIR/local.pem" \
     "$LOCAL_HOST" localhost 127.0.0.1
 
-# Save hostname so the runbook can reference it
 echo "$LOCAL_HOST" > "$CERT_DIR/hostname.txt"
-
 echo "✅ Certificate saved to backend/certs/"
 
 # ── 5. npm install ─────────────────────────────────────────────
@@ -88,9 +92,9 @@ echo "======================================"
 echo "  Setup Complete!"
 echo "======================================"
 echo ""
-echo "  App URL (laptop):  https://${LOCAL_HOST}:3001"
+echo "  App URL (laptop):    https://${LOCAL_HOST}:3001"
 echo "  Scanner URL (phone): https://${LOCAL_HOST}:3001/scan.html"
 echo ""
 echo "  Next step: Install the certificate on your iPhone."
-echo "  See RUNBOOK.md → 'iPhone Certificate Setup' section."
+echo "  See RUNBOOK.pdf → 'iPhone Certificate Setup' section."
 echo ""
