@@ -901,26 +901,13 @@ app.post('/api/customers', (req, res) => {
                     return;
                 }
                 
-                // Initialize sequence for new customer
-                db.run(
-                    'INSERT INTO customer_sequences (customer_id, last_sequence) VALUES (?, 0)',
-                    [customer_id],
-                    function(seqErr) {
-                        if (seqErr) {
-                            db.run('ROLLBACK');
-                            console.error('❌ Error initializing sequence:', seqErr);
-                            res.status(500).json({ error: seqErr.message });
-                        } else {
-                            db.run('COMMIT');
-                            console.log(`✅ Customer ${customer_id} added and sequence initialized`);
-                            res.json({ 
-                                id: this.lastID, 
-                                customer_id,
-                                message: `Customer ${customer_id} added successfully!`
-                            });
-                        }
-                    }
-                );
+                db.run('COMMIT');
+                console.log(`✅ Customer ${customer_id} added`);
+                res.json({
+                    id: this.lastID,
+                    customer_id,
+                    message: `Customer ${customer_id} added successfully!`
+                });
             }
         );
     });
